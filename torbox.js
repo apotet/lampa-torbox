@@ -1,4 +1,4 @@
-/* My TorBox library for Lampa. v0.2 */
+/* My TorBox library for Lampa. v0.3 */
 (function(){
 'use strict';
 if(window.__myTorboxLibrary01)return; window.__myTorboxLibrary01=true;
@@ -36,7 +36,9 @@ if(!menu.length){setTimeout(addMenu,500);return;}
 if(menu.find('[data-action="mytorbox_library"]').length)return;
 var button=$('<li class="menu__item selector" data-action="mytorbox_library"><div class="menu__ico"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h18v13H3zM3 7l4-4h10l4 4M8 12h8"/></svg></div><div class="menu__text">Мой TorBox</div></li>');
 button.on('hover:enter',function(){openLibrary('menu');});
-menu.append(button);
+var home=menu.find('[data-action="main"]').first();
+if(home.length)button.insertAfter(home);
+else menu.prepend(button);
 }
 function boot(){if(!window.Lampa||!Lampa.SettingsApi||!Lampa.Select){setTimeout(boot,500);return;}
 Lampa.SettingsApi.addComponent({component:'mytorbox_library',name:'Мой TorBox',icon:'<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h18v13H3zM3 7l4-4h10l4 4M8 12h8"/></svg>'});
@@ -47,3 +49,5 @@ else addMenu();
 }
 boot();
 })();
+
+
