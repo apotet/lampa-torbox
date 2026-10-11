@@ -1,4 +1,4 @@
-/* My TorBox library for Lampa. v0.1 */
+/* My TorBox library for Lampa. v0.2 */
 (function(){
 'use strict';
 if(window.__myTorboxLibrary01)return; window.__myTorboxLibrary01=true;
@@ -11,7 +11,9 @@ async function api(route){var key=token();if(!key)throw Error('Сначала в
 var ctl=new AbortController(),t=setTimeout(function(){ctl.abort();},25000);
 try{var r=await fetch(proxied('https://api.torbox.app/v1/api/'+route),{headers:{'X-Api-Key':key},signal:ctl.signal});if(!r.ok)throw Error('TorBox HTTP '+r.status);
 var j=await r.json();if(j.success===false)throw Error(j.detail||j.error||'Ошибка TorBox');return j.data;}finally{clearTimeout(t);}}
-function choose(title,items,callback){if(!items.length){toast('Пусто');return;}Lampa.Select.show({title:title,items:items,onSelect:function(item){Lampa.Select.close();callback(item);},onBack:function(){Lampa.Controller.toggle('settings');}});}
+var returnController='settings';
+function openLibrary(controller){returnController=controller;list();}
+function choose(title,items,callback){if(!items.length){toast('Пусто');return;}Lampa.Select.show({title:title,items:items,onSelect:function(item){Lampa.Select.close();callback(item);},onBack:function(){Lampa.Controller.toggle(returnController);}});}
 function textSize(n){if(!n)return '';return ' · '+(Number(n)/1073741824).toFixed(1)+' ГБ';}
 function list(){toast('Загружаю библиотеку TorBox…');api('torrents/mylist?limit=1000&bypass_cache=true').then(function(data){
 var arr=Array.isArray(data)?data:(!data?[]:[data]);arr.sort(function(a,b){return new Date(b.created_at||0)-new Date(a.created_at||0);});
@@ -26,9 +28,22 @@ if(typeof link!=='string'||!/^https:\/\//.test(link))throw Error('Нет ссы�
 var name=(file.name||file.path||torrent.name||'TorBox').split('/').pop();
 Lampa.Player.play({url:link,title:name,card:{title:name},movie:{title:name}});
 }).catch(function(e){toast('Воспроизведение: '+e.message);});}
+function addMenu(){
+if(!window.jQuery&&!window.$){setTimeout(addMenu,500);return;}
+var $=window.jQuery||window.$;
+var menu=$('.menu .menu__list').eq(0);
+if(!menu.length){setTimeout(addMenu,500);return;}
+if(menu.find('[data-action="mytorbox_library"]').length)return;
+var button=$('<li class="menu__item selector" data-action="mytorbox_library"><div class="menu__ico"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h18v13H3zM3 7l4-4h10l4 4M8 12h8"/></svg></div><div class="menu__text">Мой TorBox</div></li>');
+button.on('hover:enter',function(){openLibrary('menu');});
+menu.append(button);
+}
 function boot(){if(!window.Lampa||!Lampa.SettingsApi||!Lampa.Select){setTimeout(boot,500);return;}
 Lampa.SettingsApi.addComponent({component:'mytorbox_library',name:'Мой TorBox',icon:'<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h18v13H3zM3 7l4-4h10l4 4M8 12h8"/></svg>'});
-Lampa.SettingsApi.addParam({component:'mytorbox_library',param:{name:'mytorbox_open',type:'button'},field:{name:'Открыть библиотеку TorBox',description:'Торренты и файлы, добавленные в TorBox, включая ручные загрузки'},onChange:list});
+Lampa.SettingsApi.addParam({component:'mytorbox_library',param:{name:'mytorbox_open',type:'button'},field:{name:'Открыть библиотеку TorBox',description:'Торренты и файлы, добавленные в TorBox, включая ручные загрузки'},onChange:function(){openLibrary('settings');}});
+if(window.appready)addMenu();
+else if(Lampa.Listener&&Lampa.Listener.follow)Lampa.Listener.follow('app',function(e){if(e.type==='ready')addMenu();});
+else addMenu();
 }
 boot();
 })();
