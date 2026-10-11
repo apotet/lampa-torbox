@@ -1,4 +1,4 @@
-/* My TorBox library for Lampa. v0.3 */
+/* My TorBox library for Lampa. v0.4 */
 (function(){
 'use strict';
 if(window.__myTorboxLibrary01)return; window.__myTorboxLibrary01=true;
@@ -37,6 +37,17 @@ if(menu.find('[data-action="mytorbox_library"]').length)return;
 var button=$('<li class="menu__item selector" data-action="mytorbox_library"><div class="menu__ico"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h18v13H3zM3 7l4-4h10l4 4M8 12h8"/></svg></div><div class="menu__text">Мой TorBox</div></li>');
 button.on('hover:enter',function(){openLibrary('menu');});
 var home=menu.find('[data-action="main"]').first();
+if(Lampa.Storage&&Lampa.Storage.get&&Lampa.Storage.set&&!Lampa.Storage.get('mytorbox_menu_position_v04',false)){
+var order=Lampa.Storage.get('menu_sort','[]');
+if(!Array.isArray(order))order=[];
+order=order.filter(function(name){return name!=='Мой TorBox';});
+if(!order.length)menu.find('.menu__item .menu__text').each(function(){order.push($(this).text().trim());});
+var homeName=home.length?home.find('.menu__text').text().trim():'';
+var homeIndex=order.indexOf(homeName);
+order.splice(homeIndex>=0?homeIndex+1:0,0,'Мой TorBox');
+Lampa.Storage.set('menu_sort',order);
+Lampa.Storage.set('mytorbox_menu_position_v04',true);
+}
 if(home.length)button.insertAfter(home);
 else menu.prepend(button);
 }
@@ -49,5 +60,9 @@ else addMenu();
 }
 boot();
 })();
+
+
+
+
 
 
