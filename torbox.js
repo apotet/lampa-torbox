@@ -1,4 +1,4 @@
-/* My TorBox library for Lampa. v0.5 */
+/* My TorBox library for Lampa. v0.6 */
 (function(){
 'use strict';
 if(window.__myTorboxLibrary01)return; window.__myTorboxLibrary01=true;
@@ -15,18 +15,28 @@ var returnController='settings';
 function openLibrary(controller){returnController=controller;list();}
 function choose(title,items,callback){if(!items.length){toast('Пусто');return;}Lampa.Select.show({title:title,items:items,onSelect:function(item){Lampa.Select.close();callback(item);},onBack:function(){Lampa.Controller.toggle(returnController);}});}
 function textSize(n){if(!n)return '';return ' · '+(Number(n)/1073741824).toFixed(1)+' ГБ';}
+var recentKey='mytorbox_recent_v1';
+function recent(){try{var r=JSON.parse(localStorage.getItem(recentKey)||'[]');return Array.isArray(r)?r.filter(function(v){return v&&typeof v.key==='string'&&isFinite(v.time)&&v.time>0;}):[];}catch(e){return [];}}
+function torrentKey(t){return String(t.hash||(t.id!=null?t.id:(t.name||'')));}
+function fileKey(f){return String(f.id!=null?f.id:(f.path||f.name||''));}
+function remember(t,f){try{var key=torrentKey(t),r=recent().filter(function(v){return v.key!==key;});r.unshift({key:key,file:fileKey(f),time:Date.now()});localStorage.setItem(recentKey,JSON.stringify(r.slice(0,100)));}catch(e){/* Playback remains available if storage is full. */}}
+function lastPlayed(t,r){var key=torrentKey(t);for(var i=0;i<r.length;i++)if(r[i].key===key)return r[i];return null;}
+function sortLibrary(arr,r){return arr.sort(function(a,b){var ar=lastPlayed(a,r),br=lastPlayed(b,r);return ((br&&br.time)||0)-((ar&&ar.time)||0)||(Date.parse(b.created_at)||0)-(Date.parse(a.created_at)||0);});}
 function list(){toast('Загружаю библиотеку TorBox…');api('torrents/mylist?limit=1000&bypass_cache=true').then(function(data){
-var arr=Array.isArray(data)?data:(!data?[]:[data]);arr.sort(function(a,b){return new Date(b.created_at||0)-new Date(a.created_at||0);});
-choose('Мой TorBox · '+arr.length,arr.map(function(t){return {title:safe(t.name||'Без названия'),subtitle:safe(t.download_state||t.status||'')+textSize(t.size),torrent:t};}),function(item){files(item.torrent);});
+var arr=Array.isArray(data)?data:(!data?[]:[data]),r=recent();sortLibrary(arr,r);
+choose('Мой TorBox · '+arr.length,arr.map(function(t){return {title:safe(t.name||'Без названия'),subtitle:(lastPlayed(t,r)?'Недавно смотрели · ':'')+safe(t.download_state||t.status||'')+textSize(t.size),torrent:t};}),function(item){files(item.torrent);});
 }).catch(function(e){toast('Библиотека: '+e.message);});}
 function files(torrent){var files=Array.isArray(torrent.files)?torrent.files:[];if(!files.length){toast('В этом торренте нет файлов. Обновляю…');api('torrents/mylist?id='+encodeURIComponent(torrent.id)+'&bypass_cache=true').then(function(r){filesView(torrent,Array.isArray(r)?(r[0]&&r[0].files||[]):(r&&r.files||[]));}).catch(function(e){toast(e.message);});}else filesView(torrent,files);}
 function filesView(torrent,arr){var vids=arr.filter(function(f){return /\.(mkv|mp4|avi|m4v|ts|mov|webm)$/i.test(f.name||f.path||'');});if(!vids.length){toast('Видео в этой загрузке не найдено');return;}
-choose(safe(torrent.name||'Файлы'),vids.map(function(f){return {title:safe(f.name||f.path||'Видео'),subtitle:textSize(f.size).trim(),file:f};}),function(item){play(torrent,item.file);});}
+var last=lastPlayed(torrent,recent());
+if(last)vids.sort(function(a,b){return Number(fileKey(b)===last.file)-Number(fileKey(a)===last.file);});
+choose(safe(torrent.name||'Файлы'),vids.map(function(f){return {title:safe(f.name||f.path||'Видео'),subtitle:((last&&fileKey(f)===last.file)?'Последний запуск · ':'')+textSize(f.size).trim(),file:f};}),function(item){play(torrent,item.file);});}
 function play(torrent,file){toast('Получаю ссылку для воспроизведения…');
 api('torrents/requestdl?torrent_id='+encodeURIComponent(torrent.id)+'&file_id='+encodeURIComponent(file.id)+'&token='+encodeURIComponent(token())).then(function(link){
 if(typeof link!=='string'||!/^https:\/\//.test(link))throw Error('Нет ссылки для воспроизведения');
 var name=(file.name||file.path||torrent.name||'TorBox').split('/').pop();
 Lampa.Player.play({url:link,title:name,card:{title:name},movie:{title:name}});
+remember(torrent,file);
 }).catch(function(e){toast('Воспроизведение: '+e.message);});}
 function addMenu(){
 if(!window.jQuery&&!window.$){setTimeout(addMenu,500);return;}
@@ -67,6 +77,7 @@ else addMenu();
 }
 boot();
 })();
+
 
 
 
