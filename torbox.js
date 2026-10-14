@@ -1,4 +1,4 @@
-/* My TorBox library for Lampa. v0.9 */
+/* My TorBox library for Lampa. v1.0 */
 (function(){
 'use strict';
 if(window.__myTorboxLibrary01)return; window.__myTorboxLibrary01=true;
@@ -23,7 +23,7 @@ function remember(t,f){try{var key=torrentKey(t),r=recent().filter(function(v){r
 function lastPlayed(t,r){var key=torrentKey(t);for(var i=0;i<r.length;i++)if(r[i].key===key)return r[i];return null;}
 function sortLibrary(arr,r){return arr.sort(function(a,b){var ar=lastPlayed(a,r),br=lastPlayed(b,r);return ((br&&br.time)||0)-((ar&&ar.time)||0)||(Date.parse(b.created_at)||0)-(Date.parse(a.created_at)||0);});}
 var libraryData=[],libraryQuery='',libraryView=0,metaQueue=[],metaActive=0,metaPending={};
-var metaKey='mytorbox_metadata_v2',metadata={};
+var metaKey='mytorbox_metadata_v3',metadata={};
 try{var stored=JSON.parse(localStorage.getItem(metaKey)||'{}');if(stored&&typeof stored==='object'&&!Array.isArray(stored))metadata=stored;}catch(e){}
 function normalize(s){return String(s||'').toLowerCase().replace(/ё/g,'е').replace(/[^a-zа-я0-9]/g,'');}
 function cleanName(name){
@@ -35,18 +35,43 @@ return {title:s||String(name||'Без названия'),year:year};}
 function metaCacheKey(t){var n=cleanName(t.name);return normalize(n.title)+'|'+n.year;}
 function cachedMeta(t){var c=metadata[metaCacheKey(t)];return c&&Date.now()-c.at<(c.data?2592000000:43200000)?c:null;}
 function saveMetadata(){try{var keys=Object.keys(metadata).sort(function(a,b){return metadata[b].at-metadata[a].at;});var next={};keys.slice(0,250).forEach(function(k){next[k]=metadata[k];});metadata=next;localStorage.setItem(metaKey,JSON.stringify(metadata));}catch(e){}}
-function matchMetadata(t,results){var n=cleanName(t.name),query=normalize(n.title),matches=(results||[]).filter(function(v){var year=String(v.release_date||v.first_air_date||'').slice(0,4);return (v.media_type==='movie'||v.media_type==='tv')&&(!n.year||year===n.year)&&(normalize(v.title||v.name)===query||normalize(v.original_title||v.original_name)===query);});
-return matches.length===1?matches[0]:null;}
+function searchNames(t){
+var n=cleanName(t.name).title,raw=String(t.name||'').replace(/[._]/g,' '),out=[n];
+var alias=n.replace(/\\s*\\([^)]*\\)/g,'').replace(/\\s*\\[[^\\]]*\\]/g,'').trim();
+if(alias&&alias!==n)out.push(alias);
+var parts=n.split(/\\s*[-–—|/]\\s*/);
+if(parts.length>1){out.push(parts[0]);out.push(parts[parts.length-1]);}
+var en=raw.match(/([A-Za-z][A-Za-z0-9 '\\-]{3,50})(?:\\s+(?:S\\d|Season|20\\d\\d|1080p|2160p))/i);
+if(en)out.push(en[1].trim());
+return out.map(function(x){return x.trim();}).filter(function(x,i,a){return x.length>2&&a.indexOf(x)===i;}).slice(0,4);
+}
+function matchMetadata(t,results){
+var names=searchNames(t),n=cleanName(t.name),scores=(results||[]).filter(function(v){return (v.media_type==='movie'||v.media_type==='tv')&&v.poster_path;}).map(function(v){
+var names2=[v.title,v.name,v.original_title,v.original_name].filter(Boolean).map(normalize);
+var titleScore=0;names.forEach(function(x){var q=normalize(x);names2.forEach(function(y){if(q&&q===y)titleScore=Math.max(titleScore,100);else if(q.length>5&&y.length>5&&(q.indexOf(y)===0||y.indexOf(q)===0))titleScore=Math.max(titleScore,65);});});
+var yr=String(v.release_date||v.first_air_date||'').slice(0,4),yearScore=(!n.year||!yr)?0:(Number(yr)===Number(n.year)?20:(Math.abs(Number(yr)-Number(n.year))===1?-5:-40));
+return {item:v,score:titleScore+yearScore};
+}).filter(function(x){return x.score>=65;}).sort(function(a,b){return b.score-a.score;});
+return scores.length&&(!scores[1]||scores[0].score>scores[1].score)?scores[0].item:null;
+}
 function resolveMetadata(t,callback){
 var c=cachedMeta(t),key=metaCacheKey(t);if(c){callback(c.data);return;}
 if(!Lampa.TMDB||!Lampa.TMDB.api||!Lampa.TMDB.key){callback(null);return;}
 if(metaPending[key]){metaPending[key].push(callback);return;}
 metaPending[key]=[callback];metaQueue.push({key:key,torrent:t});pumpMetadata();}
-function pumpMetadata(){while(metaActive<2&&metaQueue.length){(function(job){metaActive++;
-var n=cleanName(job.torrent.name),ctl=new AbortController(),timer=setTimeout(function(){ctl.abort();},6000);
-var url=Lampa.TMDB.api('search/multi?api_key='+encodeURIComponent(Lampa.TMDB.key())+'&language=ru-RU&include_adult=false&query='+encodeURIComponent(n.title));
-fetch(url,{signal:ctl.signal}).then(function(r){if(!r.ok)throw Error('Metadata unavailable');return r.json();}).then(function(data){var match=matchMetadata(job.torrent,data.results);metadata[job.key]={at:Date.now(),data:match};saveMetadata();finish(match);}).catch(function(){finish(null);});
-function finish(data){clearTimeout(timer);var callbacks=metaPending[job.key]||[];delete metaPending[job.key];metaActive--;callbacks.forEach(function(cb){try{cb(data);}catch(e){}});pumpMetadata();}
+function pumpMetadata(){while(metaActive<2&&metaQueue.length){(function(job){
+metaActive++;
+var names=searchNames(job.torrent),all=[],index=0;
+function finish(data){metadata[job.key]={at:Date.now(),data:data};saveMetadata();var callbacks=metaPending[job.key]||[];delete metaPending[job.key];metaActive--;callbacks.forEach(function(cb){try{cb(data);}catch(e){}});pumpMetadata();}
+function next(){
+if(index>=names.length){finish(matchMetadata(job.torrent,all));return;}
+var query=names[index++],ctl=new AbortController(),timer=setTimeout(function(){ctl.abort();},6500);
+var url=Lampa.TMDB.api('search/multi?api_key='+encodeURIComponent(Lampa.TMDB.key())+'&language=ru-RU&include_adult=false&query='+encodeURIComponent(query));
+fetch(url,{signal:ctl.signal}).then(function(r){if(!r.ok)throw Error('Metadata unavailable');return r.json();}).then(function(data){
+all=all.concat(data.results||[]);var match=matchMetadata(job.torrent,all);if(match)finish(match);else next();
+}).catch(function(){next();}).finally(function(){clearTimeout(timer);});
+}
+next();
 })(metaQueue.shift());}}
 function searchLibrary(){if(!Lampa.Input||!Lampa.Input.edit){toast('Клавиатура Lampa недоступна');showLibrary();return;}
 Lampa.Input.edit({title:'Поиск в Мой TorBox',value:libraryQuery,free:true,nosave:true},function(value){libraryQuery=String(value||'').trim();showLibrary();});}
