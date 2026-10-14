@@ -24,7 +24,7 @@ try {
   window[PLUGIN_FLAG] = true;
 
   // ───────────────────────────── Constants / Config ─────────────────────────────
-  const VERSION = '51.2.14-titlefix1';
+  const VERSION = '51.2.14-titlefix2';
 
   const CONST = {
     CACHE_LIMIT: 128,
@@ -1266,6 +1266,8 @@ try {
 
     const state = {
       all_torrents: [],
+      show_uncertain: false,
+      search_stats: null,
       sort: Store.get('torbox_sort_method', 'seeders'),
       filters: loadFilters(),
       last_hash: null,
@@ -2731,6 +2733,9 @@ try {
       if (filter && typeof filter.render === 'function') filter.render().show();
       if (cachedToggleBtn) updateCachedToggleVisual();
       const filtered = applyFiltersSort();
+      if (!filtered.length && state.all_torrents.length && state.all_torrents.some(t=>t._title_match==='uncertain') && !state.show_uncertain) {
+        empty('Нет точных совпадений. Открой Фильтр → Сомнительные совпадения ('+state.all_torrents.filter(t=>t._title_match==='uncertain').length+')');
+      }
       if (Config.debug) {
         const snapshotRaw = Store.get(lastTorrentStorageKey(), '') || '';
         LOG('TorBox render stats', {
@@ -2802,6 +2807,7 @@ try {
 
       // Apply filters
       const rules = [
+        (t) => state.show_uncertain ? t._title_match === 'uncertain' : t._title_match !== 'uncertain',
         (t) => !state.show_only_cached || !!t.cached,
         (t) => !isTrackerExcluded(t.trackers, excludedTrackersSet),
         (t) => state.filters.quality === 'all' || t.quality === state.filters.quality,
@@ -3001,6 +3007,7 @@ try {
       };
 
       const baseItems = [
+        { title: state.show_uncertain ? '✓ Сомнительные совпадения (показаны)' : 'Сомнительные совпадения ('+state.all_torrents.filter(t=>t._title_match==='uncertain').length+')', uncertain: true },
         { title: translate('torbox_filter_refine'), refine: true },
         buildOne('quality', 'torbox_filter_quality', state.all_torrents.map((t) => t.quality)),
         buildOne('video_type', 'torbox_filter_video_type', state.all_torrents.map((t) => t.video_type)),
@@ -3043,6 +3050,9 @@ try {
       refreshFilterFocusBinding();
     };
 
+    const toastSearchStats = (st) => {
+      if (Lampa.Noty && Lampa.Noty.show) Lampa.Noty.show('TorBox: найдено '+st.total+' · подходят '+st.accepted+' · сомнительных '+st.uncertain);
+    };
     const search = (force = false, customTitle = null) => {
       cancelActiveTorrentFlow();
       abort.abort();
@@ -3054,6 +3064,7 @@ try {
       this.activity.loader(true);
       reset();
       state.search_query = customTitle;
+      state.show_uncertain = false;
 
       const movieForSearch = customTitle
         ? { ...object.movie, title: customTitle, original_title: customTitle, year: '' }
@@ -3083,14 +3094,15 @@ try {
             return empty(translate('torbox_search_parser_empty'));
           }
 
-          const matching = new Map(Array.from(mapByHash.entries()).filter(([, raw]) =>
-            customTitle || releaseMatchesMovie(raw?.Title, object.movie)
-          ));
-          const hashes = Array.from(matching.keys());
-          if (!hashes.length) return empty('Нет релизов, соответствующих выбранному фильму и году');
+          const matching = new Map(), uncertain = new Map();
+          mapByHash.forEach((raw,hex) => {
+            if (customTitle || releaseMatchesMovie(raw?.Title, object.movie)) matching.set(hex,raw);
+            else uncertain.set(hex,raw);
+          });
+          state.search_stats = { total:mapByHash.size, accepted:matching.size, uncertain:uncertain.size };
+          const hashes = Array.from(mapByHash.keys());
           empty(translateWithParams('torbox_check_cache_progress', { count: hashes.length }));
-
-          return Api.checkCached(hashes, signal).then((cachedMap) => ({ mapByHash: matching, cachedMap }));
+          return Api.checkCached(hashes, signal).then((cachedMap) => ({ mapByHash, matching, cachedMap }));
         })
         .then((payload) => {
           if (!payload || signal.aborted) return;
@@ -3104,8 +3116,14 @@ try {
           const list = [];
 
           payload.mapByHash.forEach((raw, hex) => {
-            list.push(toViewItem(raw, hex, cachedSet));
+            const item = toViewItem(raw, hex, cachedSet);
+            item._title_match = payload.matching.has(hex) ? 'accepted' : 'uncertain';
+            list.push(item);
           });
+          if (state.search_stats) {
+            const st=state.search_stats;
+            toastSearchStats(st);
+          }
 
           Cache.set(cacheKey, list);
           state.all_torrents = list;
@@ -3164,6 +3182,7 @@ try {
           state.sort = a.key;
           Store.set('torbox_sort_method', a.key);
         } else if (type === 'filter') {
+          if (a.uncertain) { state.show_uncertain = !state.show_uncertain; build(); Lampa.Controller.toggle('content'); return; }
           if (a.refine) {
             const combos = generateSearchCombinations(object.movie);
             if (!combos.length) {
