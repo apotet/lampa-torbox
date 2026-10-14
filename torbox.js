@@ -37,11 +37,11 @@ function cachedMeta(t){var c=metadata[metaCacheKey(t)];return c&&Date.now()-c.at
 function saveMetadata(){try{var keys=Object.keys(metadata).sort(function(a,b){return metadata[b].at-metadata[a].at;});var next={};keys.slice(0,250).forEach(function(k){next[k]=metadata[k];});metadata=next;localStorage.setItem(metaKey,JSON.stringify(metadata));}catch(e){}}
 function searchNames(t){
 var n=cleanName(t.name).title,raw=String(t.name||'').replace(/[._]/g,' '),out=[n];
-var alias=n.replace(/\\s*\\([^)]*\\)/g,'').replace(/\\s*\\[[^\\]]*\\]/g,'').trim();
+var alias=n.replace(/\s*\([^)]*\)/g,'').replace(/\s*\[[^\]]*\]/g,'').trim();
 if(alias&&alias!==n)out.push(alias);
-var parts=n.split(/\\s*[-–—|/]\\s*/);
+var parts=n.split(/\s*[-–—|/]\s*/);
 if(parts.length>1){out.push(parts[0]);out.push(parts[parts.length-1]);}
-var en=raw.match(/([A-Za-z][A-Za-z0-9 '\\-]{3,50})(?:\\s+(?:S\\d|Season|20\\d\\d|1080p|2160p))/i);
+var en=raw.match(/([A-Za-z][A-Za-z0-9 '\-]{3,50})(?:\s+(?:S\d|Season|20\d\d|1080p|2160p))/i);
 if(en)out.push(en[1].trim());
 return out.map(function(x){return x.trim();}).filter(function(x,i,a){return x.length>2&&a.indexOf(x)===i;}).slice(0,4);
 }
