@@ -1,4 +1,4 @@
-/* My TorBox library for Lampa. v0.7 */
+/* My TorBox library for Lampa. v0.8 */
 (function(){
 'use strict';
 if(window.__myTorboxLibrary01)return; window.__myTorboxLibrary01=true;
@@ -53,7 +53,7 @@ Lampa.Input.edit({title:'Поиск в Мой TorBox',value:libraryQuery,free:tr
 function drawCard(row,item,view,load){
 if(!item.torrent)return;
 var $=window.jQuery||window.$;if(!$)return;
-row.addClass('mytorbox-card');var poster=row.find('.mytorbox-poster');if(!poster.length){poster=$('<div class="mytorbox-poster">▶</div>');row.prepend(poster);}
+row.addClass('mytorbox-card');row.attr('title',item.torrent.name||'');var poster=row.find('.mytorbox-poster');if(!poster.length){poster=$('<div class="mytorbox-poster">▶</div>');row.prepend(poster);}
 if(!load&&!cachedMeta(item.torrent))return;
 resolveMetadata(item.torrent,function(data){if(view!==libraryView||!data)return;
 row.find('.selectbox-item__title').text(data.title||data.name||item.clean.title);
@@ -112,7 +112,7 @@ else menu.prepend(button);
 if(history.length)history.insertAfter(button);
 }
 function boot(){if(!window.Lampa||!Lampa.SettingsApi||!Lampa.Select){setTimeout(boot,500);return;}
-var $=window.jQuery||window.$;if($&&!$('#mytorbox-card-style').length)$('head').append('<style id="mytorbox-card-style">.mytorbox-card{display:flex;align-items:center;gap:1em;padding:1em 1.5em}.mytorbox-card>div:last-child{min-width:0;flex:1}.mytorbox-poster{width:4.2em;height:6.3em;flex-shrink:0;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.1);border-radius:.35em;overflow:hidden}.mytorbox-poster img{width:100%;height:100%;object-fit:cover}.mytorbox-card .selectbox-item__subtitle small{font-size:.75em;overflow-wrap:anywhere;opacity:.65}</style>');
+var $=window.jQuery||window.$;if($&&!$('#mytorbox-card-style').length)$('head').append('<style id="mytorbox-card-style">.mytorbox-card{display:block!important;position:relative!important;box-sizing:border-box!important;min-height:7.2em!important;padding:1em 1.2em 1em 6.5em!important;overflow:hidden!important;white-space:normal!important}.mytorbox-card .mytorbox-poster{position:absolute!important;left:1em;top:50%;transform:translateY(-50%);width:4.2em;height:6.1em;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.1);border-radius:.35em;overflow:hidden}.mytorbox-card .mytorbox-poster img{width:100%;height:100%;object-fit:cover}.mytorbox-card .selectbox-item__title,.mytorbox-card .selectbox-item__subtitle{display:block!important;position:relative!important;box-sizing:border-box!important;width:100%!important;max-width:100%!important;min-width:0!important;margin-left:0!important;white-space:normal!important;overflow:hidden!important;overflow-wrap:break-word!important;word-break:normal!important}.mytorbox-card .selectbox-item__title{line-height:1.3!important;display:-webkit-box!important;-webkit-box-orient:vertical;-webkit-line-clamp:2}.mytorbox-card .selectbox-item__subtitle{line-height:1.35!important;font-size:.8em!important;max-height:3.9em;opacity:.8}.mytorbox-card .selectbox-item__subtitle small{display:block!important;font-size:.85em!important;white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important;max-width:100%!important;opacity:.65}</style>');
 Lampa.SettingsApi.addComponent({component:'mytorbox_library',name:'Мой TorBox',icon:'<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h18v13H3zM3 7l4-4h10l4 4M8 12h8"/></svg>'});
 Lampa.SettingsApi.addParam({component:'mytorbox_library',param:{name:'mytorbox_open',type:'button'},field:{name:'Открыть библиотеку TorBox',description:'Торренты и файлы, добавленные в TorBox, включая ручные загрузки'},onChange:function(){openLibrary('settings');}});
 if(window.appready)addMenu();
