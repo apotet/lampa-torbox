@@ -1,4 +1,4 @@
-/* My TorBox library for Lampa. v0.6 */
+/* My TorBox library for Lampa. v0.7 */
 (function(){
 'use strict';
 if(window.__myTorboxLibrary01)return; window.__myTorboxLibrary01=true;
@@ -22,9 +22,52 @@ function fileKey(f){return String(f.id!=null?f.id:(f.path||f.name||''));}
 function remember(t,f){try{var key=torrentKey(t),r=recent().filter(function(v){return v.key!==key;});r.unshift({key:key,file:fileKey(f),time:Date.now()});localStorage.setItem(recentKey,JSON.stringify(r.slice(0,100)));}catch(e){/* Playback remains available if storage is full. */}}
 function lastPlayed(t,r){var key=torrentKey(t);for(var i=0;i<r.length;i++)if(r[i].key===key)return r[i];return null;}
 function sortLibrary(arr,r){return arr.sort(function(a,b){var ar=lastPlayed(a,r),br=lastPlayed(b,r);return ((br&&br.time)||0)-((ar&&ar.time)||0)||(Date.parse(b.created_at)||0)-(Date.parse(a.created_at)||0);});}
+var libraryData=[],libraryQuery='',libraryView=0,metaQueue=[],metaActive=0,metaPending={};
+var metaKey='mytorbox_metadata_v1',metadata={};
+try{var stored=JSON.parse(localStorage.getItem(metaKey)||'{}');if(stored&&typeof stored==='object'&&!Array.isArray(stored))metadata=stored;}catch(e){}
+function normalize(s){return String(s||'').toLowerCase().replace(/ё/g,'е').replace(/[^a-zа-я0-9]/g,'');}
+function cleanName(name){
+var s=String(name||'Без названия').split('/').pop().replace(/\.(mkv|mp4|avi|m4v|ts|mov|webm)$/i,'').replace(/[._]/g,' '),year='',m,found,re=/\b(19\d{2}|20\d{2})\b/g;
+while((found=re.exec(s)))if(found.index>0)m=found;
+if(m&&m.index>0){year=m[1];s=s.slice(0,m.index);}
+s=s.replace(/\b(?:S\d{1,2}(?:E\d{1,3})?|\d{3,4}p|WEB[ -]?DL|WEBRip|BDRemux|BluRay|HDRip|HDTV|DVDRip|HEVC|HDR|H[ -]?26[45]|x26[45])\b.*$/i,'').replace(/\[[^\]]*\]/g,'').replace(/[-–]+/g,' ').replace(/\s+/g,' ').trim();
+return {title:s||String(name||'Без названия'),year:year};}
+function metaCacheKey(t){var n=cleanName(t.name);return normalize(n.title)+'|'+n.year;}
+function cachedMeta(t){var c=metadata[metaCacheKey(t)];return c&&Date.now()-c.at<(c.data?2592000000:43200000)?c:null;}
+function saveMetadata(){try{var keys=Object.keys(metadata).sort(function(a,b){return metadata[b].at-metadata[a].at;});var next={};keys.slice(0,250).forEach(function(k){next[k]=metadata[k];});metadata=next;localStorage.setItem(metaKey,JSON.stringify(metadata));}catch(e){}}
+function matchMetadata(t,results){var n=cleanName(t.name),query=normalize(n.title),matches=(results||[]).filter(function(v){var year=String(v.release_date||v.first_air_date||'').slice(0,4);return (v.media_type==='movie'||v.media_type==='tv')&&(!n.year||year===n.year)&&(normalize(v.title||v.name)===query||normalize(v.original_title||v.original_name)===query);});
+return matches.length===1?matches[0]:null;}
+function resolveMetadata(t,callback){
+var c=cachedMeta(t),key=metaCacheKey(t);if(c){callback(c.data);return;}
+if(!Lampa.TMDB||!Lampa.TMDB.api||!Lampa.TMDB.key){callback(null);return;}
+if(metaPending[key]){metaPending[key].push(callback);return;}
+metaPending[key]=[callback];metaQueue.push({key:key,torrent:t});pumpMetadata();}
+function pumpMetadata(){while(metaActive<2&&metaQueue.length){(function(job){metaActive++;
+var n=cleanName(job.torrent.name),ctl=new AbortController(),timer=setTimeout(function(){ctl.abort();},6000);
+var url=Lampa.TMDB.api('search/multi?api_key='+encodeURIComponent(Lampa.TMDB.key())+'&language=ru-RU&include_adult=false&query='+encodeURIComponent(n.title));
+fetch(url,{signal:ctl.signal}).then(function(r){if(!r.ok)throw Error('Metadata unavailable');return r.json();}).then(function(data){var match=matchMetadata(job.torrent,data.results);metadata[job.key]={at:Date.now(),data:match};saveMetadata();finish(match);}).catch(function(){finish(null);});
+function finish(data){clearTimeout(timer);var callbacks=metaPending[job.key]||[];delete metaPending[job.key];metaActive--;callbacks.forEach(function(cb){try{cb(data);}catch(e){}});pumpMetadata();}
+})(metaQueue.shift());}}
+function searchLibrary(){if(!Lampa.Input||!Lampa.Input.edit){toast('Клавиатура Lampa недоступна');showLibrary();return;}
+Lampa.Input.edit({title:'Поиск в Мой TorBox',value:libraryQuery,free:true,nosave:true},function(value){libraryQuery=String(value||'').trim();showLibrary();});}
+function drawCard(row,item,view,load){
+if(!item.torrent)return;
+var $=window.jQuery||window.$;if(!$)return;
+row.addClass('mytorbox-card');var poster=row.find('.mytorbox-poster');if(!poster.length){poster=$('<div class="mytorbox-poster">▶</div>');row.prepend(poster);}
+if(!load&&!cachedMeta(item.torrent))return;
+resolveMetadata(item.torrent,function(data){if(view!==libraryView||!data)return;
+row.find('.selectbox-item__title').text(data.title||data.name||item.clean.title);
+if(data.poster_path&&/^\/[a-zA-Z0-9_.-]+$/.test(data.poster_path)&&Lampa.TMDB.image){var img=$('<img alt="">');img.attr('src',Lampa.TMDB.image('t/p/w185'+data.poster_path));img.on('error',function(){poster.text('▶');});poster.empty().append(img);}
+});}
+function showLibrary(){
+var view=++libraryView,drawn=0,r=recent(),q=normalize(libraryQuery),arr=sortLibrary(libraryData.slice(),r).filter(function(t){var n=cleanName(t.name),m=cachedMeta(t),d=m&&m.data;return !q||normalize(t.name).indexOf(q)>=0||normalize(n.title).indexOf(q)>=0||(d&&normalize(d.title||d.name).indexOf(q)>=0);});
+var items=[{title:'⌕ Поиск по библиотеке',subtitle:libraryQuery?'Запрос: '+safe(libraryQuery):'Найти фильм или сериал',action:'search'}];
+if(libraryQuery)items.push({title:'Показать все загрузки',action:'clear'});
+if(!arr.length)items.push({title:'Ничего не найдено',subtitle:'Измени запрос или покажи все загрузки',noenter:true});
+arr.forEach(function(t){var n=cleanName(t.name),c=cachedMeta(t),d=c&&c.data;items.push({title:safe(d?(d.title||d.name):n.title),subtitle:(lastPlayed(t,r)?'Недавно смотрели · ':'')+(n.year?n.year+' · ':'')+safe(t.download_state||t.status||'')+textSize(t.size)+'<br><small>'+safe(t.name||'')+'</small>',torrent:t,clean:n});});
+Lampa.Select.show({title:'Мой TorBox · '+arr.length+(libraryQuery?' / '+libraryData.length:''),items:items,onDraw:function(row,item){drawCard(row,item,view,drawn++<12);},onFocus:function(item,row){var $=window.jQuery||window.$;if($)drawCard($(row),item,view,true);},onSelect:function(item){libraryView++;Lampa.Select.close();if(item.action==='search')searchLibrary();else if(item.action==='clear'){libraryQuery='';showLibrary();}else files(item.torrent);},onBack:function(){libraryView++;Lampa.Controller.toggle(returnController);}});}
 function list(){toast('Загружаю библиотеку TorBox…');api('torrents/mylist?limit=1000&bypass_cache=true').then(function(data){
-var arr=Array.isArray(data)?data:(!data?[]:[data]),r=recent();sortLibrary(arr,r);
-choose('Мой TorBox · '+arr.length,arr.map(function(t){return {title:safe(t.name||'Без названия'),subtitle:(lastPlayed(t,r)?'Недавно смотрели · ':'')+safe(t.download_state||t.status||'')+textSize(t.size),torrent:t};}),function(item){files(item.torrent);});
+libraryData=Array.isArray(data)?data:(!data?[]:[data]);showLibrary();
 }).catch(function(e){toast('Библиотека: '+e.message);});}
 function files(torrent){var files=Array.isArray(torrent.files)?torrent.files:[];if(!files.length){toast('В этом торренте нет файлов. Обновляю…');api('torrents/mylist?id='+encodeURIComponent(torrent.id)+'&bypass_cache=true').then(function(r){filesView(torrent,Array.isArray(r)?(r[0]&&r[0].files||[]):(r&&r.files||[]));}).catch(function(e){toast(e.message);});}else filesView(torrent,files);}
 function filesView(torrent,arr){var vids=arr.filter(function(f){return /\.(mkv|mp4|avi|m4v|ts|mov|webm)$/i.test(f.name||f.path||'');});if(!vids.length){toast('Видео в этой загрузке не найдено');return;}
@@ -69,6 +112,7 @@ else menu.prepend(button);
 if(history.length)history.insertAfter(button);
 }
 function boot(){if(!window.Lampa||!Lampa.SettingsApi||!Lampa.Select){setTimeout(boot,500);return;}
+var $=window.jQuery||window.$;if($&&!$('#mytorbox-card-style').length)$('head').append('<style id="mytorbox-card-style">.mytorbox-card{display:flex;align-items:center;gap:1em;padding:1em 1.5em}.mytorbox-card>div:last-child{min-width:0;flex:1}.mytorbox-poster{width:4.2em;height:6.3em;flex-shrink:0;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.1);border-radius:.35em;overflow:hidden}.mytorbox-poster img{width:100%;height:100%;object-fit:cover}.mytorbox-card .selectbox-item__subtitle small{font-size:.75em;overflow-wrap:anywhere;opacity:.65}</style>');
 Lampa.SettingsApi.addComponent({component:'mytorbox_library',name:'Мой TorBox',icon:'<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h18v13H3zM3 7l4-4h10l4 4M8 12h8"/></svg>'});
 Lampa.SettingsApi.addParam({component:'mytorbox_library',param:{name:'mytorbox_open',type:'button'},field:{name:'Открыть библиотеку TorBox',description:'Торренты и файлы, добавленные в TorBox, включая ручные загрузки'},onChange:function(){openLibrary('settings');}});
 if(window.appready)addMenu();
