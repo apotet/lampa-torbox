@@ -1,8 +1,8 @@
-/* My TorBox library for Lampa. v1.3.0 — direct library resume */
+/* My TorBox library for Lampa. v1.3.1 — movie and series resume */
 (function(){
 'use strict';
 if(window.__myTorboxLibrary01)return; window.__myTorboxLibrary01=true;
-var VERSION='1.3.0',playbackSession=0,ownedPlayback=0,latestSelect=null;
+var VERSION='1.3.1',playbackSession=0,ownedPlayback=0,latestSelect=null;
 window.__myTorboxLibraryVersion=VERSION;
 function playerOwnsScreen(){
 if(!ownedPlayback)return false;
@@ -159,7 +159,7 @@ var matches=vids.filter(function(f){var n=episodeNumbers(f);return n&&n.episode=
 if(matches.length!==1){toast(matches.length?'Нужно уточнить сезон':'Запрошенная серия в загрузке не найдена');filesView(t,vids);return;}
 selected=matches[0];
 }else{var last=lastPlayed(t,recent());if(last)selected=vids.find(function(f){return fileKey(f)===last.file;})||null;}
-filesView(t,vids,selected);
+filesView(t,vids,selected,req.t);
 }
 async function resumeLibrary(req){
 var serial=++resumeSerial;returnController='menu';dismissSelect();toast('Открываю сериал в Мой TorBox…');
@@ -188,12 +188,12 @@ if(m)return 'Сезон '+Number(m[1])+' · Серия '+Number(m[2]);
 var e=raw.match(/(?:серия|episode|ep)[ ._-]*(\d{1,3})/i);
 return e?'Серия '+Number(e[1]):'Видео '+(index+1);
 }
-function filesView(torrent,arr,requestedFile){var vids=arr.filter(function(f){return /\.(mkv|mp4|avi|m4v|ts|mov|webm)$/i.test(f.name||f.path||'');});if(!vids.length){toast('Видео в этой загрузке не найдено');return;}
+function filesView(torrent,arr,requestedFile,requestedTitle){var vids=arr.filter(function(f){return /\.(mkv|mp4|avi|m4v|ts|mov|webm)$/i.test(f.name||f.path||'');});if(!vids.length){toast('Видео в этой загрузке не найдено');return;}
 var last=requestedFile?{file:fileKey(requestedFile)}:lastPlayed(torrent,recent());
-var focusLabel=requestedFile?'▶ Запрошенная серия · ':'▶ Последний запуск · ';
+var focusLabel=requestedFile?(episodeNumbers(requestedFile)?'▶ Запрошенная серия · ':'▶ Выбранное видео · '):'▶ Последний запуск · ';
 if(last)vids.sort(function(a,b){return Number(fileKey(b)===last.file)-Number(fileKey(a)===last.file);});
 var entries=vids.map(function(f,i){return {title:safe(episodeTitle(f,i)),subtitle:((last&&fileKey(f)===last.file)?focusLabel:'')+textSize(f.size).trim()+'<br><small>'+safe((f.name||f.path||'').split('/').pop())+'</small>',file:f};});
-showLibraryDialog({title:safe(cleanName(torrent.name).title)+' · v'+VERSION,items:entries,onDraw:function(row){var $=window.jQuery||window.$;if($)$(row).addClass('mytorbox-file');},onSelect:function(item){dismissSelect();play(torrent,item.file,arr);},onBack:function(){showLibrary();}});}
+showLibraryDialog({title:safe(requestedTitle||cleanName(torrent.name).title)+' · v'+VERSION,items:entries,onDraw:function(row){var $=window.jQuery||window.$;if($)$(row).addClass('mytorbox-file');},onSelect:function(item){dismissSelect();play(torrent,item.file,arr);},onBack:function(){showLibrary();}});}
 function episodeNumbers(f){var raw=String(f.name||f.path||'');
 var m=raw.match(/S(\d{1,2})[ ._-]*E(\d{1,3})/i)||raw.match(/\b(\d{1,2})x(\d{1,3})\b/i);
 if(m)return {season:Number(m[1]),episode:Number(m[2])};
