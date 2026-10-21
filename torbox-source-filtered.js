@@ -14,7 +14,7 @@
  * --------------------------------------------------------------------- */
 
 try {
-  console.log('[TorBox] boot strap', '51.2.14');
+  console.log('[TorBox] boot strap', '51.2.15');
   (function () {
   'use strict';
 
@@ -24,7 +24,7 @@ try {
   window[PLUGIN_FLAG] = true;
 
   // ───────────────────────────── Constants / Config ─────────────────────────────
-  const VERSION = '51.2.14-titlefix2';
+  const VERSION = '51.2.15-episodes';
 
   const CONST = {
     CACHE_LIMIT: 128,
@@ -2047,8 +2047,9 @@ try {
         card: movie,
       };
       // Infer season/episode numbers when present
-      const s = (cleanName || '').match(/[Ss](\d{1,2})/);
-      const e = (cleanName || '').match(/[Ee](\d{1,3})/);
+      const cross = (cleanName || '').match(/\b(\d{1,2})x(\d{1,3})\b/i);
+      const s = (cleanName || '').match(/[Ss](\d{1,2})/) || (cross && [cross[0], cross[1]]);
+      const e = (cleanName || '').match(/[Ee](\d{1,3})/) || (cross && [cross[0], cross[2]]);
       if (s) cfg.season = parseInt(s[1], 10);
       if (e) cfg.episode = parseInt(e[1], 10);
       // Episode without a season marker ("Show - 05.mkv"): Lampa treats it as season 1.
@@ -2060,7 +2061,7 @@ try {
       const tlKey =
         cfg.season != null && cfg.episode != null
           ? [cfg.season, cfg.season > 10 ? ':' : '', cfg.episode, origTitle].join('')
-          : String(origTitle);
+          : isSeriesContent() ? `${origTitle}:${file?.name || file?.id}` : String(origTitle);
       if (Lampa.Timeline && typeof Lampa.Timeline.view === 'function') {
         cfg.timeline = Lampa.Timeline.view(Lampa.Utils.hash(tlKey));
       }
@@ -2173,8 +2174,8 @@ try {
       }
     };
 
-    const resolveFileDownloadLink = async (torrentData, file) => {
-      const dl = await Api.requestDl(torrentData.id, file.id);
+    const resolveFileDownloadLink = async (torrentData, file, signal) => {
+      const dl = await Api.requestDl(torrentData.id, file.id, signal);
       const link = normalizeSafeDownloadLink(dl?.url || dl?.data);
       if (!link) throw { type: 'api', message: translate('torbox_error_file_link') };
       return link;
@@ -2376,25 +2377,83 @@ try {
       }
     };
 
+    // Supply real URLs before launching: Android players discard lazy URL functions.
+    // Restrict auto-next to this release; never guess a release for another season.
+    const buildEpisodePlaylist = async (torrentData, file, link, signal) => {
+      const current = _getPlayerConfig(link, file, object.movie);
+      if (!isSeriesContent()) return [{ config: current, file }];
+      const extensions = getVideoExtensions();
+      const isExtra = (f) => /(?:^|[\/\\ ._-])(?:samples?|trailers?|teasers?|extras?|featurettes?|тизер|трейлер)(?:[\/\\ ._-]|$)/i.test(f.name || '');
+      const ordered = (Array.isArray(torrentData.files) ? torrentData.files : [])
+        .filter((f) => extensions.includes(String(f.name || '').split('.').pop().toLowerCase()) && !isExtra(f))
+        .map((f, i) => Object.assign({ __idx: i }, f))
+        .sort(Utils.naturalEpisodeSort);
+      const index = ordered.findIndex((f) => String(f.id) === String(file.id));
+      if (index < 0) return [{ config: current, file }];
+      const remaining = ordered.slice(index + 1);
+      const results = new Array(remaining.length);
+      let cursor = 0;
+      await Promise.all(Array.from({ length: Math.min(3, remaining.length) }, async () => {
+        while (cursor < remaining.length && !signal.aborted) {
+          const i = cursor++;
+          try {
+            const url = await resolveFileDownloadLink(torrentData, remaining[i], signal);
+            results[i] = { config: _getPlayerConfig(url, remaining[i], object.movie), file: remaining[i] };
+          } catch (error) {
+            results[i] = null;
+            LOG('Episode link unavailable', remaining[i].id, error?.type || error?.name);
+          }
+        }
+      }));
+      if (signal.aborted) throw { type: 'cancel' };
+      const firstFailed = results.findIndex((entry) => !entry);
+      if (firstFailed >= 0) {
+        Lampa.Noty.show('Не удалось подготовить все серии. Автопереход доступен до первой недоступной серии.');
+      }
+      // Do not jump over a failed episode to a later one.
+      return [{ config: current, file }].concat(firstFailed < 0 ? results : results.slice(0, firstFailed));
+    };
+
     const play = async (torrentData, file, callbacks = {}) => {
       const { onSuccess, onFail, onFinally, onStart } = callbacks || {};
       let playbackStarted = false;
       let finished = false;
+      let playbackFile = file;
+      const controller = new AbortController();
+      const cancel = () => controller.abort();
+      abort.signal.addEventListener('abort', cancel);
+      Lampa.Loading.start(cancel, 'Подготавливаю серии…');
 
       try {
         preparePlaybackState(torrentData);
 
         if (object.movie?.id) Lampa.Favorite.add('history', object.movie);
 
-        const link = await resolveFileDownloadLink(torrentData, file);
+        const link = await resolveFileDownloadLink(torrentData, file, controller.signal);
 
-        const playbackConfig = _getPlayerConfig(link, file, object.movie);
+        const entries = await buildEpisodePlaylist(torrentData, file, link, controller.signal);
+        if (controller.signal.aborted) throw { type: 'cancel' };
+        const playlist = entries.map((entry) => {
+          entry.config.callback = () => {
+            playbackFile = entry.file;
+            rememberPreferredFile(torrentData, entry.file);
+            _markWatched(torrentData.hash || torrentData.id, entry.file.id);
+          };
+          return entry.config;
+        });
+        const playbackConfig = playlist[0];
+        // Pass in the launch payload as well as to the web player API.
+        // Only the launch item owns the array (no circular playlist objects).
+        const launchConfig = Object.assign({}, playbackConfig, { playlist });
+        if (playlist.length > 1 && Lampa.Storage?.set) Lampa.Storage.set('playlist_next', true);
+        Lampa.Loading.stop();
 
-        const startResult = Lampa.Player.play(playbackConfig);
+        const startResult = Lampa.Player.play(launchConfig);
         playbackStarted = startResult !== false;
         if (!playbackStarted) {
           throw { type: 'cancel', message: translate('torbox_error_player_cancelled') };
         }
+        if (typeof Lampa.Player.playlist === 'function') Lampa.Player.playlist(playlist);
 
         if (pendingPlayback) pendingPlayback.started = true;
 
@@ -2411,9 +2470,9 @@ try {
         Lampa.Player.callback(() => {
           if (finished) return;
           finished = true;
-          const changed = _markWatched(torrentData.hash || torrentData.id, file.id);
+          const changed = _markWatched(torrentData.hash || torrentData.id, playbackFile.id);
           finalizePendingPlayback();
-          if (typeof onSuccess === 'function') onSuccess({ torrentData, file, changed });
+          if (typeof onSuccess === 'function') onSuccess({ torrentData, file: playbackFile, changed });
         });
       } catch (e) {
         if (!playbackStarted) {
@@ -2421,8 +2480,10 @@ try {
           if (reverted && state.view === 'torrents') build();
         }
         if (typeof onFail === 'function') onFail(e);
-        if (e?.type !== 'cancel') ErrorHandler.show(e.type || 'error', e);
+        if (e?.type !== 'cancel' && e?.name !== 'AbortError') ErrorHandler.show(e.type || 'error', e);
       } finally {
+        abort.signal.removeEventListener('abort', cancel);
+        Lampa.Loading.stop();
         if (typeof onFinally === 'function') onFinally({ started: playbackStarted, file, torrentData });
       }
     };
@@ -4005,3 +4066,4 @@ try {
     }
   } catch {}
 }
+
