@@ -8,6 +8,14 @@ function setup(torrents,history=[]){
  return {context,calls,dialogs,searches,notices,hooks:context.hooks};
 }
 const files=[1,2,3,4,5].map(n=>({id:n,name:`Special.Ops.Lioness.S01E0${n}.mkv`,size:1e9}));
+test('movie resume shows the saved file under the requested localized title without catalog search',async()=>{
+ const t={id:44,name:'Несчастный случай (Accident Man) (2018).mkv',files:[{id:1,name:'Accident.Man.2018.mkv',size:24e9}]};
+ const x=setup([t],[{key:'44',file:'1',time:Date.now()}]);await x.hooks.resumeLibrary({t:'Несчастный случай'});
+ assert.equal(x.searches.length,0);assert.equal(x.dialogs.length,1);
+ assert.match(x.dialogs[0].title,/^Несчастный случай · v1\.3\.1$/);
+ assert.equal(x.dialogs[0].items[0].title,'Видео 1');assert.equal(x.dialogs[0].items[0].file.id,1);
+ assert.match(x.dialogs[0].items[0].subtitle,/Выбранное видео/);
+});
 test('resume uses only owned TorBox uploads and puts the requested S01E04 first without playback',async()=>{
  const t={id:10,name:'Special.Ops.Lioness.S01.1080p',files};const x=setup([t]);
  await x.hooks.resumeLibrary({t:'Спецназ: Львица',s:1,e:4});
