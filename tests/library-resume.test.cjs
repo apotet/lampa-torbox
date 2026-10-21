@@ -153,3 +153,13 @@ test('unsafe files stop the ordered queue before playback can cross the size lim
  const x=setup([]);let launch;x.context.fetch=async()=>({ok:true,json:async()=>({success:true,data:'https://cdn.example.invalid/movie.mkv'})});x.context.Lampa.Player={play:d=>launch=d,playlist(){},callback(){}};
  const files=[{id:1,name:'Example.S01E01.mkv',size:1e9},{id:2,name:'Example.S01E02.mkv',size:31*1073741824},{id:3,name:'Example.S01E03.mkv',size:1e9}];await x.hooks.play({id:11,name:'Example'},files[0],files);assert.equal(launch.playlist.length,1);assert.equal(launch.playlist[0].episode,1);
 });
+
+test('unsolicited cached setup cannot confirm a fresh native handshake',async()=>{
+ const x=setup([]);x.hooks.installResumeBridge();let requests=0,handoffs=0,launches=0;
+ x.hooks.acceptSessionSetup('__NEY_SESSION_SETUP__:'+JSON.stringify({tokens:['c'.repeat(32)],expires:Date.now()+60000}));
+ x.context.AndroidJS={openBrowser:u=>{if(u.startsWith('ney-tv-session://request?fresh='))requests++;else handoffs++;}};
+ x.context.fetch=async()=>({ok:true,json:async()=>({success:true,data:'https://cdn.example.invalid/movie.mkv'})});
+ x.context.Lampa.Player={play:()=>launches++,playlist(){},callback(){}};
+ const f={id:1,name:'Example.mkv',size:1e9};await x.hooks.play({id:11,name:'Example'},f,[f]);
+ assert.equal(requests,1);assert.equal(handoffs,0);assert.equal(launches,1);assert.match(x.notices.at(-1),/нет связи с APK/);
+});
