@@ -294,6 +294,7 @@ var duration=Number(checkpoint.duration)||0,percent=duration>0?seconds/duration*
 checkpoint.handler(percent,seconds,duration);
 launch.timeline=Object.assign({},checkpoint,{time:seconds});launch.position=seconds;playlist[0]=Object.assign({},playlist[0],{timeline:launch.timeline,position:seconds});
 }
+console.log('[NEY session] bridge='+typeof window.AndroidJS+' open='+((window.AndroidJS&&typeof AndroidJS.openBrowser)||'none')+' recovery='+!!(resumeRequest&&resumeRequest.f));
 if(!(resumeRequest&&resumeRequest.f)&&window.AndroidJS&&typeof AndroidJS.openBrowser==='function'){
 var sessionNonce=resumeRequest&&resumeRequest.n?resumeRequest.n:await manualSessionToken();
 if(ctl.signal.aborted)return;
