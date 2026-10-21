@@ -2,7 +2,7 @@
 (function(){
 'use strict';
 if(window.__myTorboxLibrary01)return; window.__myTorboxLibrary01=true;
-var VERSION='1.3.1',playbackSession=0,ownedPlayback=0,latestSelect=null;
+var VERSION='1.3.2',playbackSession=0,ownedPlayback=0,latestSelect=null;
 window.__myTorboxLibraryVersion=VERSION;
 function playerOwnsScreen(){
 if(!ownedPlayback)return false;
@@ -129,15 +129,31 @@ function files(torrent){var files=Array.isArray(torrent.files)?torrent.files:[];
 // It never forwards a resume request to the general catalog and never auto-plays.
 var RESUME_PREFIX='__NEY_TORBOX__:',resumeSerial=0;
 function resumeNames(title){
-var groups=[['Львица','Львицы','Спецназ: Львица','Lioness','Special Ops: Lioness'],['Друзья','Friends']];
-var key=normalize(title),names=[title];
-groups.forEach(function(g){if(g.some(function(n){return normalize(n)===key;}))names=names.concat(g);});
-return names.map(normalize).filter(function(n,i,a){return n&&a.indexOf(n)===i;});
+// Split bilingual release titles by script, never by a title-specific alias.
+var value=cleanName(title).title,names=[value];
+var parts=value.match(/[А-Яа-яЁё0-9][А-Яа-яЁё0-9\s:!?,'’\-]*/g)||[];
+parts=parts.concat(value.match(/[A-Za-z0-9][A-Za-z0-9\s:!?,'’\-]*/g)||[]);
+return names.concat(parts.filter(function(p){return /[A-Za-zА-Яа-яЁё]/.test(p);})).map(normalize).filter(function(n,i,a){return n&&a.indexOf(n)===i;});
 }
 function resumeMatch(t,title){
 var names=searchNames(t),c=cachedMeta(t),d=c&&c.data;
 if(d)names=names.concat([d.title,d.name,d.original_title,d.original_name].filter(Boolean));
-var aliases=resumeNames(title);return names.some(function(n){return aliases.indexOf(normalize(n))>=0;});
+var aliases=resumeNames(title);return names.some(function(n){return resumeNames(n).some(function(v){return aliases.indexOf(v)>=0;});});
+}
+async function translatedMatches(torrents,title){
+if(!Lampa.TMDB||!Lampa.TMDB.api||!Lampa.TMDB.key)return [];
+var ctl=new AbortController(),timer=setTimeout(function(){ctl.abort();},4500);
+try{var url=Lampa.TMDB.api('search/multi?api_key='+encodeURIComponent(Lampa.TMDB.key())+'&language=ru-RU&include_adult=false&query='+encodeURIComponent(title));
+var response=await fetch(url,{signal:ctl.signal});if(!response.ok)return [];
+var data=await response.json(),results=(data.results||[]).filter(function(d){return (d.media_type==='movie'||d.media_type==='tv')&&[d.title,d.name,d.original_title,d.original_name].some(function(n){return n&&normalize(n)===normalize(title);});});
+return torrents.filter(function(t){return results.some(function(d){var year=String(d.release_date||d.first_air_date||'').slice(0,4),own=cleanName(t.name).year;
+if(d.media_type==='movie'&&year&&own&&year!==own)return false;
+return [d.title,d.name,d.original_title,d.original_name].some(function(n){return n&&resumeMatch(t,n);});});});
+}catch(e){return [];}finally{clearTimeout(timer);}
+}
+function resumeError(code){
+var labels={library_not_found:'Название не найдено в Мой TorBox',history_missing:'Нет истории просмотра',library_ambiguous:'Найдено несколько загрузок без однозначной истории',episode_not_found:'Запрошенная серия не найдена',library_failed:'Не удалось получить библиотеку TorBox'};
+showLibraryDialog({title:'Продолжение просмотра · v'+VERSION,items:[{title:labels[code]||labels.library_failed,noenter:true}],onBack:function(){Lampa.Controller.toggle(returnController);}});
 }
 function parseResume(query){
 if(typeof query!=='string'||query.indexOf(RESUME_PREFIX)!==0)return null;
@@ -152,35 +168,43 @@ if(!arr.length){var result=await api('torrents/mylist?id='+encodeURIComponent(t.
 if(serial!==resumeSerial)return;
 var vids=orderedVideos(arr),seasonName=String(t.name||'').match(/\bS(\d{1,2})(?:\b|E)|(?:season|сезон)[ ._-]*(\d{1,2})/i),torrentSeason=seasonName?Number(seasonName[1]||seasonName[2]):null;
 if(req.s!=null)vids=vids.filter(function(f){var n=episodeNumbers(f);return n&&(n.season!=null?n.season:torrentSeason)===req.s;});
-if(!vids.length){toast('В этой загрузке нет запрошенного сезона');return;}
+if(!vids.length){resumeError('episode_not_found');return;}
 var selected=null;
 if(req.e!=null){
 var matches=vids.filter(function(f){var n=episodeNumbers(f);return n&&n.episode===req.e;});
-if(matches.length!==1){toast(matches.length?'Нужно уточнить сезон':'Запрошенная серия в загрузке не найдена');filesView(t,vids);return;}
+if(matches.length!==1){resumeError(matches.length?'library_ambiguous':'episode_not_found');return;}
 selected=matches[0];
-}else{var last=lastPlayed(t,recent());if(last)selected=vids.find(function(f){return fileKey(f)===last.file;})||null;}
+}else{var last=lastPlayed(t,recent());if(last)selected=vids.find(function(f){return fileKey(f)===last.file;})||null;
+if(!selected){resumeError('history_missing');return;}}
 filesView(t,vids,selected,req.t);
 }
 async function resumeLibrary(req){
-var serial=++resumeSerial;returnController='menu';dismissSelect();toast('Открываю сериал в Мой TorBox…');
+var serial=++resumeSerial;returnController='menu';dismissSelect();toast('Ищу в Мой TorBox…');
 try{
 var data=await api('torrents/mylist?limit=1000&bypass_cache=true');if(serial!==resumeSerial)return;
 libraryData=Array.isArray(data)?data:(!data?[]:[data]);
-var matches=sortLibrary(libraryData.filter(function(t){return resumeMatch(t,req.t);}),recent());
-if(!matches.length){toast('Сериал не найден среди загрузок Мой TorBox');return;}
+var history=recent(),isRecent=req.t==='@recent'||req.t==='@yesterday';
+var matches=sortLibrary(libraryData.filter(function(t){if(!isRecent)return resumeMatch(t,req.t);var h=lastPlayed(t,history);if(!h)return false;if(req.t==='@yesterday'){var date=new Date();date.setDate(date.getDate()-1);return new Date(h.time).toDateString()===date.toDateString();}return true;}),history);
+if(!isRecent&&!matches.length){matches=sortLibrary(await translatedMatches(libraryData,req.t),history);if(serial!==resumeSerial)return;}
+if(!matches.length){resumeError(isRecent?'history_missing':'library_not_found');return;}
+if(matches.length>1){var first=lastPlayed(matches[0],history),second=lastPlayed(matches[1],history);if(first&&(!second||first.time>second.time))matches=[matches[0]];}
+if(isRecent&&matches.length===1)req=Object.assign({},req,{t:cleanName(matches[0].name).title});
 if(matches.length===1){await resumeFiles(matches[0],req,serial);return;}
-choose('Мой TorBox · '+safe(req.t),matches.map(function(t){return {title:safe(cleanName(t.name).title),subtitle:safe(t.name)+textSize(t.size),torrent:t};}),function(item){resumeFiles(item.torrent,req,serial).catch(function(){toast('Не удалось открыть серии TorBox');});});
-}catch(e){if(serial===resumeSerial)toast('Не удалось открыть библиотеку TorBox');}
+resumeError('library_ambiguous');
+}catch(e){if(serial===resumeSerial)resumeError('library_failed');}
 }
 function installResumeBridge(){
 if(!Lampa.Search||typeof Lampa.Search.open!=='function'){setTimeout(installResumeBridge,500);return;}
-var original=Lampa.Search.open;if(original.__mytorboxResume)return;
-var wrapped=function(options){
+var descriptor=Object.getOwnPropertyDescriptor(Lampa.Search,'open');if(descriptor&&descriptor.get&&descriptor.get.__mytorboxResume)return;
+function wrap(original){var wrapped=function(options){
 var query=typeof options==='string'?options:options&&options.input;
 if(typeof query!=='string'||query.indexOf(RESUME_PREFIX)!==0)return original.apply(this,arguments);
 try{resumeLibrary(parseResume(query));}catch(e){toast('Некорректная команда библиотеки');}
-};
-wrapped.__mytorboxResume=true;Lampa.Search.open=wrapped;
+};wrapped.__mytorboxResume=true;return wrapped;}
+var current=wrap(Lampa.Search.open),getter=function(){return current;};getter.__mytorboxResume=true;
+// Lampa/plugins replace Search.open after initial boot. Preserve the guard.
+if(!descriptor||descriptor.configurable!==false)Object.defineProperty(Lampa.Search,'open',{configurable:true,enumerable:true,get:getter,set:function(fn){if(typeof fn==='function')current=wrap(fn);}});
+else if(!Lampa.Search.open.__mytorboxResume)Lampa.Search.open=current;
 }
 function episodeTitle(f,index){
 var raw=String(f.name||f.path||''),m=raw.match(/S(\d{1,2})[ ._-]*E(\d{1,3})/i)||raw.match(/(\d{1,2})x(\d{1,3})/i);
