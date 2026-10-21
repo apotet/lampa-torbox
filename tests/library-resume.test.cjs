@@ -12,7 +12,7 @@ test('movie resume shows the saved file under the requested localized title with
  const t={id:44,name:'Несчастный случай (Accident Man) (2018).mkv',files:[{id:1,name:'Accident.Man.2018.mkv',size:24e9}]};
  const x=setup([t],[{key:'44',file:'1',time:Date.now()}]);await x.hooks.resumeLibrary({t:'Несчастный случай'});
  assert.equal(x.searches.length,0);assert.equal(x.dialogs.length,1);
- assert.match(x.dialogs[0].title,/^Несчастный случай · v1\.3\.3$/);
+ assert.match(x.dialogs[0].title,/^Несчастный случай · v1\.3\.4$/);
  assert.equal(x.dialogs[0].items[0].title,'Видео 1');assert.equal(x.dialogs[0].items[0].file.id,1);
  assert.match(x.dialogs[0].items[0].subtitle,/Выбранное видео/);
 });
@@ -76,4 +76,11 @@ test('234-episode launch resolves one CDN link and keeps the complete ordered Vi
  assert.equal(requests,1);assert.equal(queue.length,232);assert.equal(launch.playlist,queue);
  assert.equal(queue[0].episode,3);assert.equal(queue[1].episode,4);
  const next=new URL(queue[1].url);assert.equal(next.origin,'https://api.torbox.app');assert.equal(next.searchParams.get('redirect'),'true');assert.equal(next.searchParams.get('file_id'),'4');
+});
+test('movies use the same native Android ViMu launch route as series',async()=>{
+ const x=setup([]);let launch;
+ x.context.fetch=async()=>({ok:true,json:async()=>({success:true,data:'https://cdn.example.invalid/movie.mkv'})});
+ x.context.Lampa.Player={play:d=>{launch=d;},playlist(){},callback(){}};
+ const file={id:1,name:'Example.mkv',size:1e9};await x.hooks.play({id:11,name:'Example'},file,[file]);
+ assert.equal(launch.launch_player,'android');assert.equal(launch.playlist.length,1);
 });
