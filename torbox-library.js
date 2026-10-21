@@ -1,8 +1,8 @@
-/* My TorBox library for Lampa. v1.4.0 — verified library continuation */
+/* My TorBox library for Lampa. v1.4.1 — verified library continuation */
 (function(){
 'use strict';
 if(window.__myTorboxLibrary01)return; window.__myTorboxLibrary01=true;
-var VERSION='1.4.0',playbackSession=0,ownedPlayback=0,latestSelect=null;
+var VERSION='1.4.1',playbackSession=0,ownedPlayback=0,latestSelect=null;
 window.__myTorboxLibraryVersion=VERSION;
 function playerOwnsScreen(){
 if(!ownedPlayback)return false;
@@ -282,7 +282,7 @@ stopLoading();
 dismissSelect();
 ownedPlayback=launch.mytorbox_session||0;
 var restoreTimecode=null;
-if(resumeRequest&&resumeRequest.f&&window.AndroidJS&&typeof AndroidJS.storageChange==='function'){
+if(resumeRequest&&resumeRequest.f&&resumeRequest.z!=null&&window.AndroidJS&&typeof AndroidJS.storageChange==='function'){
 restoreTimecode=(Lampa.Storage&&Lampa.Storage.field?Lampa.Storage.field('player_timecode'):null)||'ask';AndroidJS.storageChange(JSON.stringify({name:'player_timecode',value:'continue'}));
 }
 try{if(Lampa.Player.play(launch)===false)throw Error('Плеер не запущен');}
