@@ -1,8 +1,8 @@
-/* My TorBox library for Lampa. v1.3.1 — movie and series resume */
+/* My TorBox library for Lampa. v1.3.3 — verified library continuation */
 (function(){
 'use strict';
 if(window.__myTorboxLibrary01)return; window.__myTorboxLibrary01=true;
-var VERSION='1.3.2',playbackSession=0,ownedPlayback=0,latestSelect=null;
+var VERSION='1.3.3',playbackSession=0,ownedPlayback=0,latestSelect=null;
 window.__myTorboxLibraryVersion=VERSION;
 function playerOwnsScreen(){
 if(!ownedPlayback)return false;
@@ -243,17 +243,17 @@ var selected=ordered.findIndex(function(f){return fileKey(f)===fileKey(file);});
 var queue=serial&&selected>=0?ordered.slice(selected):[file];
 var card=meta||{title:cleanName(torrent.name).title};
 if(serial&&!meta)card={name:cleanName(torrent.name).title,original_name:cleanName(torrent.name).title,media_type:'tv'};
-async function item(f){var link=await api('torrents/requestdl?torrent_id='+encodeURIComponent(torrent.id)+'&file_id='+encodeURIComponent(f.id)+'&token='+encodeURIComponent(token()),ctl.signal);
+async function item(f,deferred){var route='torrents/requestdl?torrent_id='+encodeURIComponent(torrent.id)+'&file_id='+encodeURIComponent(f.id)+'&token='+encodeURIComponent(token());
+// TorBox's documented redirect permalinks resolve when ViMu reaches each item.
+// Do not prepare hundreds of CDN links before starting the selected episode.
+var link=deferred?'https://api.torbox.app/v1/api/'+route+'&redirect=true':await api(route,ctl.signal);
 if(typeof link!=='string'||!/^https?:\/\//i.test(link))throw Error('Нет ссылки для воспроизведения');
 var cfg={url:link,title:String(f.name||f.path||torrent.name||'TorBox').split('/').pop(),card:card,movie:card};
 var ep=episodeNumbers(f);if(ep){if(ep.season!=null)cfg.season=ep.season;cfg.episode=ep.episode;}
 if(Lampa.Timeline&&Lampa.Utils&&Lampa.Utils.hash)cfg.timeline=Lampa.Timeline.view(Lampa.Utils.hash('mytorbox:'+torrentKey(torrent)+':'+fileKey(f)));
 cfg.callback=function(){remember(torrent,f);};return cfg;}
-var first=await item(file),resolved=new Array(queue.length);resolved[0]=first;
-var cursor=1;
-await Promise.all(Array.from({length:Math.min(3,queue.length-1)},async function(){
-while(cursor<queue.length&&!ctl.signal.aborted){var index=cursor++;try{resolved[index]=await item(queue[index]);}catch(e){resolved[index]=null;}}
-}));
+var first=await item(file),resolved=[first];
+for(var index=1;index<queue.length;index++)resolved.push(await item(queue[index],true));
 if(ctl.signal.aborted){if(playbackRequest===ctl){stopLoading();filesView(torrent,available);}return;}
 var failed=resolved.findIndex(function(v){return !v;});
 var playlist=failed<0?resolved:resolved.slice(0,failed);
