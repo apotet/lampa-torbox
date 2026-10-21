@@ -14,7 +14,7 @@
  * --------------------------------------------------------------------- */
 
 try {
-  console.log('[TorBox] boot strap', '51.2.17');
+  console.log('[TorBox] boot strap', '51.2.18');
   (function () {
   'use strict';
 
@@ -24,7 +24,7 @@ try {
   window[PLUGIN_FLAG] = true;
 
   // ───────────────────────────── Constants / Config ─────────────────────────────
-  const VERSION = '51.2.17-player-controls';
+  const VERSION = '51.2.18-vimu-playlist';
 
   const CONST = {
     CACHE_LIMIT: 128,
@@ -2440,11 +2440,8 @@ try {
         const entries = await buildEpisodePlaylist(torrentData, file, link, controller.signal);
         if (controller.signal.aborted) throw { type: 'cancel' };
         const playlist = entries.map((entry) => {
-          // TCL can terminate Lampa while ViMu is in front. Keep multi-episode
-          // sessions in Lampa instead of depending on a background JS session.
-          // Every entry needs the override: Player.start removes launch_player
-          // from the item it opens, and subsequent episodes are opened afresh.
-          if (entries.length > 1) entry.config.launch_player = 'lampa';
+          // Hand the whole season to Android/ViMu; auto-next runs in ViMu.
+          if (isSeriesContent()) entry.config.launch_player = 'android';
           entry.config.callback = () => {
             playbackFile = entry.file;
             rememberPreferredFile(torrentData, entry.file);
