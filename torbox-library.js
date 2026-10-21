@@ -1,8 +1,8 @@
-/* My TorBox library for Lampa. v1.3.3 — verified library continuation */
+/* My TorBox library for Lampa. v1.3.4 — verified library continuation */
 (function(){
 'use strict';
 if(window.__myTorboxLibrary01)return; window.__myTorboxLibrary01=true;
-var VERSION='1.3.3',playbackSession=0,ownedPlayback=0,latestSelect=null;
+var VERSION='1.3.4',playbackSession=0,ownedPlayback=0,latestSelect=null;
 window.__myTorboxLibraryVersion=VERSION;
 function playerOwnsScreen(){
 if(!ownedPlayback)return false;
@@ -260,7 +260,7 @@ var playlist=failed<0?resolved:resolved.slice(0,failed);
 if(failed>=0)toast('Следующая недоступная серия не будет пропущена. Её можно будет открыть из списка.');
 // Pass the complete ordered queue to Android/ViMu in the launch payload.
 // ViMu advances locally, even when Android reclaims Lampa in the background.
-if(serial)playlist.forEach(function(cfg){cfg.launch_player='android';});
+playlist.forEach(function(cfg){cfg.launch_player='android';});
 var launch=Object.assign({},playlist[0],{playlist:playlist});
 if(playlist.length>1&&Lampa.Storage)Lampa.Storage.set('playlist_next',true);
 // Loading.stop restores the old controller even if its layer was already removed.
