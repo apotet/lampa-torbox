@@ -1,4 +1,4 @@
-/* My TorBox library for Lampa. v1.1.1 — keep player controls after launch */
+/* My TorBox library for Lampa. v1.1.2 — dismiss selection without Back callbacks */
 (function(){
 'use strict';
 if(window.__myTorboxLibrary01)return; window.__myTorboxLibrary01=true;
@@ -14,7 +14,10 @@ try{var r=await fetch(proxied('https://api.torbox.app/v1/api/'+route),{headers:{
 var j=await r.json();if(j.success===false)throw Error(j.detail||j.error||'Ошибка TorBox');return j.data;}finally{clearTimeout(t);if(signal)signal.removeEventListener('abort',cancel);}}
 var returnController='settings';
 function openLibrary(controller){returnController=controller;list();}
-function choose(title,items,callback){if(!items.length){toast('Пусто');return;}Lampa.Select.show({title:title,items:items,onSelect:function(item){Lampa.Select.close();callback(item);},onBack:function(){Lampa.Controller.toggle(returnController);}});}
+// Select.close() means Back: it invokes onBack and can reopen the library.
+// Selection already hides the dialog; dismiss without navigation callbacks.
+function dismissSelect(){if(typeof Lampa.Select.closeAll==='function')Lampa.Select.closeAll();else Lampa.Select.hide();}
+function choose(title,items,callback){if(!items.length){toast('Пусто');return;}Lampa.Select.show({title:title,items:items,onSelect:function(item){dismissSelect();callback(item);},onBack:function(){Lampa.Controller.toggle(returnController);}});}
 function textSize(n){if(!n)return '';return ' · '+(Number(n)/1073741824).toFixed(1)+' ГБ';}
 var recentKey='mytorbox_recent_v1';
 function recent(){try{var r=JSON.parse(localStorage.getItem(recentKey)||'[]');return Array.isArray(r)?r.filter(function(v){return v&&typeof v.key==='string'&&isFinite(v.time)&&v.time>0;}):[];}catch(e){return [];}}
@@ -91,7 +94,7 @@ var items=[{title:'⌕ Поиск по библиотеке',subtitle:libraryQue
 if(libraryQuery)items.push({title:'Показать все загрузки',action:'clear'});
 if(!arr.length)items.push({title:'Ничего не найдено',subtitle:'Измени запрос или покажи все загрузки',noenter:true});
 arr.forEach(function(t){var n=cleanName(t.name),c=cachedMeta(t),d=c&&c.data;items.push({title:safe(d?(d.title||d.name):n.title),subtitle:(lastPlayed(t,r)?'Недавно смотрели · ':'')+(n.year?n.year+' · ':'')+safe(t.download_state||t.status||'')+textSize(t.size)+'<br><small>'+safe(t.name||'')+'</small>',torrent:t,clean:n});});
-Lampa.Select.show({title:'Мой TorBox · '+arr.length+(libraryQuery?' / '+libraryData.length:''),items:items,onDraw:function(row,item){drawCard(row,item,view,drawn++<12);},onFocus:function(item,row){var $=window.jQuery||window.$;if($)drawCard($(row),item,view,true);},onSelect:function(item){libraryView++;Lampa.Select.close();if(item.action==='search')searchLibrary();else if(item.action==='clear'){libraryQuery='';showLibrary();}else files(item.torrent);},onBack:function(){libraryView++;Lampa.Controller.toggle(returnController);}});}
+Lampa.Select.show({title:'Мой TorBox · '+arr.length+(libraryQuery?' / '+libraryData.length:''),items:items,onDraw:function(row,item){drawCard(row,item,view,drawn++<12);},onFocus:function(item,row){var $=window.jQuery||window.$;if($)drawCard($(row),item,view,true);},onSelect:function(item){libraryView++;dismissSelect();if(item.action==='search')searchLibrary();else if(item.action==='clear'){libraryQuery='';showLibrary();}else files(item.torrent);},onBack:function(){libraryView++;Lampa.Controller.toggle(returnController);}});}
 function list(){toast('Загружаю библиотеку TorBox…');api('torrents/mylist?limit=1000&bypass_cache=true').then(function(data){
 libraryData=Array.isArray(data)?data:(!data?[]:[data]);showLibrary();
 }).catch(function(e){toast('Библиотека: '+e.message);});}
@@ -106,7 +109,7 @@ function filesView(torrent,arr){var vids=arr.filter(function(f){return /\.(mkv|m
 var last=lastPlayed(torrent,recent());
 if(last)vids.sort(function(a,b){return Number(fileKey(b)===last.file)-Number(fileKey(a)===last.file);});
 var entries=vids.map(function(f,i){return {title:safe(episodeTitle(f,i)),subtitle:((last&&fileKey(f)===last.file)?'▶ Последний запуск · ':'')+textSize(f.size).trim()+'<br><small>'+safe((f.name||f.path||'').split('/').pop())+'</small>',file:f};});
-Lampa.Select.show({title:safe(cleanName(torrent.name).title),items:entries,onDraw:function(row){var $=window.jQuery||window.$;if($)$(row).addClass('mytorbox-file');},onSelect:function(item){Lampa.Select.close();play(torrent,item.file,arr);},onBack:function(){showLibrary();}});}
+Lampa.Select.show({title:safe(cleanName(torrent.name).title),items:entries,onDraw:function(row){var $=window.jQuery||window.$;if($)$(row).addClass('mytorbox-file');},onSelect:function(item){dismissSelect();play(torrent,item.file,arr);},onBack:function(){showLibrary();}});}
 function episodeNumbers(f){var raw=String(f.name||f.path||'');
 var m=raw.match(/S(\d{1,2})[ ._-]*E(\d{1,3})/i)||raw.match(/\b(\d{1,2})x(\d{1,3})\b/i);
 if(m)return {season:Number(m[1]),episode:Number(m[2])};
@@ -153,6 +156,7 @@ if(playlist.length>1&&Lampa.Storage)Lampa.Storage.set('playlist_next',true);
 // Loading.stop restores the old controller even if its layer was already removed.
 // Release it once, BEFORE Player.play takes ownership of the remote.
 stopLoading();
+dismissSelect();
 if(Lampa.Player.play(launch)===false)throw Error('Плеер не запущен');
 if(typeof Lampa.Player.playlist==='function')Lampa.Player.playlist(playlist);
 remember(torrent,file);
