@@ -1,8 +1,8 @@
-/* My TorBox library for Lampa. v1.2.2 — native ViMu episode playlist */
+/* My TorBox library for Lampa. v1.3.0 — direct library resume */
 (function(){
 'use strict';
 if(window.__myTorboxLibrary01)return; window.__myTorboxLibrary01=true;
-var VERSION='1.2.2',playbackSession=0,ownedPlayback=0,latestSelect=null;
+var VERSION='1.3.0',playbackSession=0,ownedPlayback=0,latestSelect=null;
 window.__myTorboxLibraryVersion=VERSION;
 function playerOwnsScreen(){
 if(!ownedPlayback)return false;
@@ -125,16 +125,74 @@ function list(){toast('Загружаю библиотеку TorBox…');api('to
 libraryData=Array.isArray(data)?data:(!data?[]:[data]);showLibrary();
 }).catch(function(e){toast('Библиотека: '+e.message);});}
 function files(torrent){var files=Array.isArray(torrent.files)?torrent.files:[];if(!files.length){toast('В этом торренте нет файлов. Обновляю…');api('torrents/mylist?id='+encodeURIComponent(torrent.id)+'&bypass_cache=true').then(function(r){filesView(torrent,Array.isArray(r)?(r[0]&&r[0].files||[]):(r&&r.files||[]));}).catch(function(e){toast(e.message);});}else filesView(torrent,files);}
+// Explicit owner command carried by the installed Android ACTION_SEARCH bridge.
+// It never forwards a resume request to the general catalog and never auto-plays.
+var RESUME_PREFIX='__NEY_TORBOX__:',resumeSerial=0;
+function resumeNames(title){
+var groups=[['Львица','Львицы','Спецназ: Львица','Lioness','Special Ops: Lioness'],['Друзья','Friends']];
+var key=normalize(title),names=[title];
+groups.forEach(function(g){if(g.some(function(n){return normalize(n)===key;}))names=names.concat(g);});
+return names.map(normalize).filter(function(n,i,a){return n&&a.indexOf(n)===i;});
+}
+function resumeMatch(t,title){
+var names=searchNames(t),c=cachedMeta(t),d=c&&c.data;
+if(d)names=names.concat([d.title,d.name,d.original_title,d.original_name].filter(Boolean));
+var aliases=resumeNames(title);return names.some(function(n){return aliases.indexOf(normalize(n))>=0;});
+}
+function parseResume(query){
+if(typeof query!=='string'||query.indexOf(RESUME_PREFIX)!==0)return null;
+var req=JSON.parse(query.slice(RESUME_PREFIX.length));
+if(!req||typeof req!=='object'||Array.isArray(req)||Object.keys(req).some(function(k){return ['t','s','e'].indexOf(k)<0;})||typeof req.t!=='string'||!req.t.trim()||req.t.length>100||/[\u0000-\u001f]/.test(req.t))throw Error('Некорректная команда библиотеки');
+['s','e'].forEach(function(k){if(req[k]!=null&&(!Number.isInteger(req[k])||req[k]<1||req[k]>(k==='s'?99:999)))throw Error('Некорректный сезон или серия');});
+return req;
+}
+async function resumeFiles(t,req,serial){
+var arr=Array.isArray(t.files)?t.files:[];
+if(!arr.length){var result=await api('torrents/mylist?id='+encodeURIComponent(t.id)+'&bypass_cache=true');arr=Array.isArray(result)?((result[0]&&result[0].files)||[]):((result&&result.files)||[]);}
+if(serial!==resumeSerial)return;
+var vids=orderedVideos(arr),seasonName=String(t.name||'').match(/\bS(\d{1,2})(?:\b|E)|(?:season|сезон)[ ._-]*(\d{1,2})/i),torrentSeason=seasonName?Number(seasonName[1]||seasonName[2]):null;
+if(req.s!=null)vids=vids.filter(function(f){var n=episodeNumbers(f);return n&&(n.season!=null?n.season:torrentSeason)===req.s;});
+if(!vids.length){toast('В этой загрузке нет запрошенного сезона');return;}
+var selected=null;
+if(req.e!=null){
+var matches=vids.filter(function(f){var n=episodeNumbers(f);return n&&n.episode===req.e;});
+if(matches.length!==1){toast(matches.length?'Нужно уточнить сезон':'Запрошенная серия в загрузке не найдена');filesView(t,vids);return;}
+selected=matches[0];
+}else{var last=lastPlayed(t,recent());if(last)selected=vids.find(function(f){return fileKey(f)===last.file;})||null;}
+filesView(t,vids,selected);
+}
+async function resumeLibrary(req){
+var serial=++resumeSerial;returnController='menu';dismissSelect();toast('Открываю сериал в Мой TorBox…');
+try{
+var data=await api('torrents/mylist?limit=1000&bypass_cache=true');if(serial!==resumeSerial)return;
+libraryData=Array.isArray(data)?data:(!data?[]:[data]);
+var matches=sortLibrary(libraryData.filter(function(t){return resumeMatch(t,req.t);}),recent());
+if(!matches.length){toast('Сериал не найден среди загрузок Мой TorBox');return;}
+if(matches.length===1){await resumeFiles(matches[0],req,serial);return;}
+choose('Мой TorBox · '+safe(req.t),matches.map(function(t){return {title:safe(cleanName(t.name).title),subtitle:safe(t.name)+textSize(t.size),torrent:t};}),function(item){resumeFiles(item.torrent,req,serial).catch(function(){toast('Не удалось открыть серии TorBox');});});
+}catch(e){if(serial===resumeSerial)toast('Не удалось открыть библиотеку TorBox');}
+}
+function installResumeBridge(){
+if(!Lampa.Search||typeof Lampa.Search.open!=='function'){setTimeout(installResumeBridge,500);return;}
+var original=Lampa.Search.open;if(original.__mytorboxResume)return;
+var wrapped=function(options){
+var query=typeof options==='string'?options:options&&options.input;
+if(typeof query!=='string'||query.indexOf(RESUME_PREFIX)!==0)return original.apply(this,arguments);
+try{resumeLibrary(parseResume(query));}catch(e){toast('Некорректная команда библиотеки');}
+};
+wrapped.__mytorboxResume=true;Lampa.Search.open=wrapped;
+}
 function episodeTitle(f,index){
 var raw=String(f.name||f.path||''),m=raw.match(/S(\d{1,2})[ ._-]*E(\d{1,3})/i)||raw.match(/(\d{1,2})x(\d{1,3})/i);
 if(m)return 'Сезон '+Number(m[1])+' · Серия '+Number(m[2]);
 var e=raw.match(/(?:серия|episode|ep)[ ._-]*(\d{1,3})/i);
 return e?'Серия '+Number(e[1]):'Видео '+(index+1);
 }
-function filesView(torrent,arr){var vids=arr.filter(function(f){return /\.(mkv|mp4|avi|m4v|ts|mov|webm)$/i.test(f.name||f.path||'');});if(!vids.length){toast('Видео в этой загрузке не найдено');return;}
-var last=lastPlayed(torrent,recent());
+function filesView(torrent,arr,requestedFile){var vids=arr.filter(function(f){return /\.(mkv|mp4|avi|m4v|ts|mov|webm)$/i.test(f.name||f.path||'');});if(!vids.length){toast('Видео в этой загрузке не найдено');return;}
+var last=requestedFile?{file:fileKey(requestedFile)}:lastPlayed(torrent,recent());
+var focusLabel=requestedFile?'▶ Запрошенная серия · ':'▶ Последний запуск · ';
 if(last)vids.sort(function(a,b){return Number(fileKey(b)===last.file)-Number(fileKey(a)===last.file);});
-var entries=vids.map(function(f,i){return {title:safe(episodeTitle(f,i)),subtitle:((last&&fileKey(f)===last.file)?'▶ Последний запуск · ':'')+textSize(f.size).trim()+'<br><small>'+safe((f.name||f.path||'').split('/').pop())+'</small>',file:f};});
+var entries=vids.map(function(f,i){return {title:safe(episodeTitle(f,i)),subtitle:((last&&fileKey(f)===last.file)?focusLabel:'')+textSize(f.size).trim()+'<br><small>'+safe((f.name||f.path||'').split('/').pop())+'</small>',file:f};});
 showLibraryDialog({title:safe(cleanName(torrent.name).title)+' · v'+VERSION,items:entries,onDraw:function(row){var $=window.jQuery||window.$;if($)$(row).addClass('mytorbox-file');},onSelect:function(item){dismissSelect();play(torrent,item.file,arr);},onBack:function(){showLibrary();}});}
 function episodeNumbers(f){var raw=String(f.name||f.path||'');
 var m=raw.match(/S(\d{1,2})[ ._-]*E(\d{1,3})/i)||raw.match(/\b(\d{1,2})x(\d{1,3})\b/i);
@@ -225,6 +283,7 @@ if(history.length)history.insertAfter(button);
 }
 function boot(){if(!window.Lampa||!Lampa.SettingsApi||!Lampa.Select){setTimeout(boot,500);return;}
 bindPlaybackLifecycle();
+installResumeBridge();
 var $=window.jQuery||window.$;if($&&!$('#mytorbox-card-style').length)$('head').append('<style id="mytorbox-card-style">.mytorbox-card{display:block!important;position:relative!important;box-sizing:border-box!important;min-height:7.2em!important;padding:1em 1.2em 1em 6.5em!important;overflow:hidden!important;white-space:normal!important}.mytorbox-card .mytorbox-poster{position:absolute!important;left:1em;top:50%;transform:translateY(-50%);width:4.2em;height:6.1em;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.1);border-radius:.35em;overflow:hidden}.mytorbox-card .mytorbox-poster img{width:100%;height:100%;object-fit:cover}.mytorbox-card .selectbox-item__title,.mytorbox-card .selectbox-item__subtitle{display:block!important;position:relative!important;box-sizing:border-box!important;width:100%!important;max-width:100%!important;min-width:0!important;margin-left:0!important;white-space:normal!important;overflow:hidden!important;overflow-wrap:break-word!important;word-break:normal!important}.mytorbox-card .selectbox-item__title{line-height:1.3!important;display:-webkit-box!important;-webkit-box-orient:vertical;-webkit-line-clamp:2}.mytorbox-card .selectbox-item__subtitle{line-height:1.35!important;font-size:.8em!important;max-height:3.9em;opacity:.8}.mytorbox-card .selectbox-item__subtitle small{display:block!important;font-size:.85em!important;white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important;max-width:100%!important;opacity:.65} .mytorbox-file{box-sizing:border-box!important;padding:.65em 1.1em!important;min-height:4.3em!important;overflow:hidden!important}.mytorbox-file .selectbox-item__title,.mytorbox-file .selectbox-item__subtitle{display:block!important;width:100%!important;max-width:100%!important;min-width:0!important;overflow:hidden!important;white-space:normal!important;overflow-wrap:anywhere!important}.mytorbox-file .selectbox-item__title{font-size:1em!important;font-weight:600!important;line-height:1.25!important}.mytorbox-file .selectbox-item__subtitle{font-size:.75em!important;line-height:1.3!important;opacity:.8}.mytorbox-file .selectbox-item__subtitle small{display:block!important;font-size:.85em!important;white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important;opacity:.65}</style>');
 Lampa.SettingsApi.addComponent({component:'mytorbox_library',name:'Мой TorBox',icon:'<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h18v13H3zM3 7l4-4h10l4 4M8 12h8"/></svg>'});
 Lampa.SettingsApi.addParam({component:'mytorbox_library',param:{name:'mytorbox_open',type:'button'},field:{name:'Открыть библиотеку TorBox',description:'Торренты и файлы, добавленные в TorBox, включая ручные загрузки'},onChange:function(){openLibrary('settings');}});
