@@ -1,8 +1,8 @@
-/* My TorBox library for Lampa. v1.3.4 — verified library continuation */
+/* My TorBox library for Lampa. v1.4.0 — verified library continuation */
 (function(){
 'use strict';
 if(window.__myTorboxLibrary01)return; window.__myTorboxLibrary01=true;
-var VERSION='1.3.4',playbackSession=0,ownedPlayback=0,latestSelect=null;
+var VERSION='1.4.0',playbackSession=0,ownedPlayback=0,latestSelect=null;
 window.__myTorboxLibraryVersion=VERSION;
 function playerOwnsScreen(){
 if(!ownedPlayback)return false;
@@ -158,7 +158,10 @@ showLibraryDialog({title:'Продолжение просмотра · v'+VERSIO
 function parseResume(query){
 if(typeof query!=='string'||query.indexOf(RESUME_PREFIX)!==0)return null;
 var req=JSON.parse(query.slice(RESUME_PREFIX.length));
-if(!req||typeof req!=='object'||Array.isArray(req)||Object.keys(req).some(function(k){return ['t','s','e'].indexOf(k)<0;})||typeof req.t!=='string'||!req.t.trim()||req.t.length>100||/[\u0000-\u001f]/.test(req.t))throw Error('Некорректная команда библиотеки');
+if(!req||typeof req!=='object'||Array.isArray(req)||Object.keys(req).some(function(k){return ['t','s','e','n','f','z'].indexOf(k)<0;})||typeof req.t!=='string'||!req.t.trim()||req.t.length>100||/[\u0000-\u001f]/.test(req.t))throw Error('Некорректная команда библиотеки');
+if(req.n!=null&&!/^[a-f0-9]{32}$/.test(req.n))throw Error('Некорректная сессия');
+if(req.f!=null&&(typeof req.f!=='string'||req.f.length>300||/[\\/\u0000-\u001f:@]/.test(req.f)))throw Error('Некорректный файл');
+if(req.z!=null&&(!req.f||!Number.isSafeInteger(req.z)||req.z<0||req.z>172800000))throw Error('Некорректная позиция');
 ['s','e'].forEach(function(k){if(req[k]!=null&&(!Number.isInteger(req[k])||req[k]<1||req[k]>(k==='s'?99:999)))throw Error('Некорректный сезон или серия');});
 return req;
 }
@@ -170,13 +173,14 @@ var vids=orderedVideos(arr),seasonName=String(t.name||'').match(/\bS(\d{1,2})(?:
 if(req.s!=null)vids=vids.filter(function(f){var n=episodeNumbers(f);return n&&(n.season!=null?n.season:torrentSeason)===req.s;});
 if(!vids.length){resumeError('episode_not_found');return;}
 var selected=null;
-if(req.e!=null){
+if(req.f!=null){var exact=vids.filter(function(f){return String(f.name||f.path||'').split('/').pop()===req.f;});if(exact.length!==1){resumeError('episode_not_found');return;}selected=exact[0];
+}else if(req.e!=null){
 var matches=vids.filter(function(f){var n=episodeNumbers(f);return n&&n.episode===req.e;});
 if(matches.length!==1){resumeError(matches.length?'library_ambiguous':'episode_not_found');return;}
 selected=matches[0];
 }else{var last=lastPlayed(t,recent());if(last)selected=vids.find(function(f){return fileKey(f)===last.file;})||null;
 if(!selected){resumeError('history_missing');return;}}
-filesView(t,vids,selected,req.t);
+filesView(t,vids,selected,req.t,req);
 }
 async function resumeLibrary(req){
 var serial=++resumeSerial;returnController='menu';dismissSelect();toast('Ищу в Мой TorBox…');
@@ -212,12 +216,12 @@ if(m)return 'Сезон '+Number(m[1])+' · Серия '+Number(m[2]);
 var e=raw.match(/(?:серия|episode|ep)[ ._-]*(\d{1,3})/i);
 return e?'Серия '+Number(e[1]):'Видео '+(index+1);
 }
-function filesView(torrent,arr,requestedFile,requestedTitle){var vids=arr.filter(function(f){return /\.(mkv|mp4|avi|m4v|ts|mov|webm)$/i.test(f.name||f.path||'');});if(!vids.length){toast('Видео в этой загрузке не найдено');return;}
+function filesView(torrent,arr,requestedFile,requestedTitle,resumeRequest){var vids=arr.filter(function(f){return /\.(mkv|mp4|avi|m4v|ts|mov|webm)$/i.test(f.name||f.path||'');});if(!vids.length){toast('Видео в этой загрузке не найдено');return;}
 var last=requestedFile?{file:fileKey(requestedFile)}:lastPlayed(torrent,recent());
 var focusLabel=requestedFile?(episodeNumbers(requestedFile)?'▶ Запрошенная серия · ':'▶ Выбранное видео · '):'▶ Последний запуск · ';
 if(last)vids.sort(function(a,b){return Number(fileKey(b)===last.file)-Number(fileKey(a)===last.file);});
 var entries=vids.map(function(f,i){return {title:safe(episodeTitle(f,i)),subtitle:((last&&fileKey(f)===last.file)?focusLabel:'')+textSize(f.size).trim()+'<br><small>'+safe((f.name||f.path||'').split('/').pop())+'</small>',file:f};});
-showLibraryDialog({title:safe(requestedTitle||cleanName(torrent.name).title)+' · v'+VERSION,items:entries,onDraw:function(row){var $=window.jQuery||window.$;if($)$(row).addClass('mytorbox-file');},onSelect:function(item){dismissSelect();play(torrent,item.file,arr);},onBack:function(){showLibrary();}});}
+showLibraryDialog({title:safe(requestedTitle||cleanName(torrent.name).title)+' · v'+VERSION,items:entries,onDraw:function(row){var $=window.jQuery||window.$;if($)$(row).addClass('mytorbox-file');},onSelect:function(item){dismissSelect();play(torrent,item.file,arr,resumeRequest);},onBack:function(){showLibrary();}});}
 function episodeNumbers(f){var raw=String(f.name||f.path||'');
 var m=raw.match(/S(\d{1,2})[ ._-]*E(\d{1,3})/i)||raw.match(/\b(\d{1,2})x(\d{1,3})\b/i);
 if(m)return {season:Number(m[1]),episode:Number(m[2])};
@@ -228,7 +232,7 @@ return /\.(mkv|mp4|avi|m4v|ts|mov|webm)$/i.test(name)&&!/(?:^|[\/\\ ._-])(?:samp
 if(an&&bn){var diff=(an.season||0)-(bn.season||0)||an.episode-bn.episode;if(diff)return diff;}
 return String(a.name||a.path||'').localeCompare(String(b.name||b.path||''),undefined,{numeric:true});});}
 var playbackRequest=null;
-async function play(torrent,file,allFiles){
+async function play(torrent,file,allFiles,resumeRequest){
 if(playbackRequest)playbackRequest.abort();
 var ctl=new AbortController();playbackRequest=ctl;
 var session=++playbackSession;
@@ -262,13 +266,27 @@ if(failed>=0)toast('Следующая недоступная серия не б
 // ViMu advances locally, even when Android reclaims Lampa in the background.
 playlist.forEach(function(cfg){cfg.launch_player='android';});
 var launch=Object.assign({},playlist[0],{playlist:playlist});
+if(resumeRequest&&resumeRequest.f&&resumeRequest.z!=null){
+var seconds=resumeRequest.z/1000;launch.timeline=Object.assign({},launch.timeline||{},{time:seconds});launch.position=seconds;playlist[0]=Object.assign({},playlist[0],{timeline:launch.timeline,position:seconds});
+}
+if(resumeRequest&&resumeRequest.n&&window.AndroidJS&&typeof AndroidJS.openBrowser==='function'){
+var manifest={n:resumeRequest.n,t:resumeRequest.t,selected:String(file.name||file.path||'').split('/').pop(),files:queue.map(function(f){return {name:String(f.name||f.path||'').split('/').pop(),size:Number(f.size)||0};})};
+if(manifest.files.length<=512&&manifest.files.every(function(f){return f.size>0&&f.size<=30*1073741824;})){
+var handoff='ney-tv-session://register?data='+encodeURIComponent(JSON.stringify(manifest));if(handoff.length<=180000){AndroidJS.openBrowser(handoff);await new Promise(function(resolve){setTimeout(resolve,350);});}
+}
+}
 if(playlist.length>1&&Lampa.Storage)Lampa.Storage.set('playlist_next',true);
 // Loading.stop restores the old controller even if its layer was already removed.
 // Release it once, BEFORE Player.play takes ownership of the remote.
 stopLoading();
 dismissSelect();
 ownedPlayback=launch.mytorbox_session||0;
-if(Lampa.Player.play(launch)===false)throw Error('Плеер не запущен');
+var restoreTimecode=null;
+if(resumeRequest&&resumeRequest.f&&window.AndroidJS&&typeof AndroidJS.storageChange==='function'){
+restoreTimecode=(Lampa.Storage&&Lampa.Storage.field?Lampa.Storage.field('player_timecode'):null)||'ask';AndroidJS.storageChange(JSON.stringify({name:'player_timecode',value:'continue'}));
+}
+try{if(Lampa.Player.play(launch)===false)throw Error('Плеер не запущен');}
+finally{if(restoreTimecode!=null)setTimeout(function(){AndroidJS.storageChange(JSON.stringify({name:'player_timecode',value:restoreTimecode}));},1000);}
 if(typeof Lampa.Player.playlist==='function')Lampa.Player.playlist(playlist);
 remember(torrent,file);
 Lampa.Player.callback(function(){if(ownedPlayback===session)ownedPlayback=0;filesView(torrent,available);});
