@@ -1,5 +1,5 @@
 const test=require('node:test'),assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs');
-const source=fs.readFileSync('torbox-library.js','utf8').replace('boot();\n})();','globalThis.hooks={parseResume,resumeMatch,resumeLibrary,installResumeBridge,resumeNames,play};\n})();');
+const source=fs.readFileSync('torbox-library.js','utf8').replace('boot();\n})();','globalThis.hooks={parseResume,resumeMatch,resumeLibrary,installResumeBridge,resumeNames,play,acceptSessionSetup};\n})();');
 function setup(torrents,history=[]){
  const calls=[],dialogs=[],searches=[],notices=[];
  const storage={mytorbox_recent_v1:JSON.stringify(history)};
@@ -12,7 +12,7 @@ test('movie resume shows the saved file under the requested localized title with
  const t={id:44,name:'Несчастный случай (Accident Man) (2018).mkv',files:[{id:1,name:'Accident.Man.2018.mkv',size:24e9}]};
  const x=setup([t],[{key:'44',file:'1',time:Date.now()}]);await x.hooks.resumeLibrary({t:'Несчастный случай'});
  assert.equal(x.searches.length,0);assert.equal(x.dialogs.length,1);
- assert.match(x.dialogs[0].title,/^Несчастный случай · v1\.4\.2$/);
+ assert.match(x.dialogs[0].title,/^Несчастный случай · v1\.5\.0$/);
  assert.equal(x.dialogs[0].items[0].title,'Видео 1');assert.equal(x.dialogs[0].items[0].file.id,1);
  assert.match(x.dialogs[0].items[0].subtitle,/Выбранное видео/);
 });
@@ -126,4 +126,30 @@ test('position recovery stops rather than launching when the timeline checkpoint
  const x=setup([]);let launched=false;x.context.fetch=async()=>({ok:true,json:async()=>({success:true,data:'https://cdn.example.invalid/movie.mkv'})});x.context.Lampa.Player={play:()=>launched=true,playlist(){},callback(){}};
  const f={id:1,name:'Example.mkv',size:1e9};await x.hooks.play({id:11,name:'Example'},f,[f],{t:'Example',f:f.name,z:123000});
  assert.equal(launched,false);assert.match(x.notices.at(-1),/точку продолжения/);
+});
+
+test('remote launch obtains a local token pool once, registers each selected file, and never searches the catalog',async()=>{
+ const x=setup([]);x.hooks.installResumeBridge();let requests=0;const handoffs=[],tokens=['a'.repeat(32),'b'.repeat(32)];
+ x.context.AndroidJS={openBrowser:u=>{if(u==='ney-tv-session://request'){requests++;x.context.Lampa.Search.open({input:'__NEY_SESSION_SETUP__:'+JSON.stringify({tokens,expires:Date.now()+60000})});}else handoffs.push(u);}};
+ x.context.fetch=async()=>({ok:true,json:async()=>({success:true,data:'https://cdn.example.invalid/movie.mkv'})});
+ let launches=0;x.context.Lampa.Player={play:()=>launches++,playlist(){},callback(){}};
+ const f={id:1,name:'Example.mkv',size:1e9};await x.hooks.play({id:11,name:'Example'},f,[f]);await x.hooks.play({id:11,name:'Example'},f,[f]);
+ assert.equal(launches,2);assert.equal(requests,1);assert.equal(x.searches.length,0);
+ const payloads=handoffs.map(u=>JSON.parse(new URL(u).searchParams.get('data')));assert.deepEqual(payloads.map(p=>p.n),tokens);assert.equal(payloads[0].t,'Example');assert.equal(payloads[0].selected,f.name);assert.ok(!JSON.stringify(payloads).includes('https'));assert.ok(!JSON.stringify(payloads).includes('fixture-key'));
+});
+test('malformed or expired local setup never reaches the catalog or arms playback',()=>{
+ const x=setup([]);x.hooks.installResumeBridge();
+ for(const data of [{tokens:['bad'],expires:Date.now()+60000},{tokens:['a'.repeat(32),'a'.repeat(32)],expires:Date.now()+60000},{tokens:['a'.repeat(32)],expires:Date.now()-1000}])x.context.Lampa.Search.open('__NEY_SESSION_SETUP__:'+JSON.stringify(data));
+ x.context.Lampa.Search.open('__NEY_SESSION_SETUP__:{');assert.equal(x.searches.length,0);assert.equal(x.context.localStorage.getItem('mytorbox_ney_tokens_v1'),null);
+});
+test('recovery never requests a new manual session or resets the existing retry claim',async()=>{
+ const x=setup([]);let handoffs=0,launch;
+ x.context.AndroidJS={openBrowser:()=>handoffs++,storageChange(){}};x.context.Lampa.Storage={field:()=> 'ask'};
+ x.context.Lampa.Utils={hash:()=> 'file'};x.context.Lampa.Timeline={view:()=>({hash:'file',duration:1200,handler(){}})};
+ x.context.fetch=async()=>({ok:true,json:async()=>({success:true,data:'https://cdn.example.invalid/movie.mkv'})});x.context.Lampa.Player={play:d=>launch=d,playlist(){},callback(){}};
+ const f={id:1,name:'Example.mkv',size:1e9};await x.hooks.play({id:11,name:'Example'},f,[f],{t:'Example',f:f.name,z:123000});assert.ok(launch);assert.equal(handoffs,0);
+});
+test('unsafe files stop the ordered queue before playback can cross the size limit',async()=>{
+ const x=setup([]);let launch;x.context.fetch=async()=>({ok:true,json:async()=>({success:true,data:'https://cdn.example.invalid/movie.mkv'})});x.context.Lampa.Player={play:d=>launch=d,playlist(){},callback(){}};
+ const files=[{id:1,name:'Example.S01E01.mkv',size:1e9},{id:2,name:'Example.S01E02.mkv',size:31*1073741824},{id:3,name:'Example.S01E03.mkv',size:1e9}];await x.hooks.play({id:11,name:'Example'},files[0],files);assert.equal(launch.playlist.length,1);assert.equal(launch.playlist[0].episode,1);
 });
