@@ -1,8 +1,8 @@
-/* My TorBox library for Lampa. v1.5.0 — verified library continuation */
+/* My TorBox library for Lampa. v1.5.2 — verified library continuation */
 (function(){
 'use strict';
 if(window.__myTorboxLibrary01)return; window.__myTorboxLibrary01=true;
-var VERSION='1.5.1',playbackSession=0,ownedPlayback=0,latestSelect=null;
+var VERSION='1.5.2',playbackSession=0,ownedPlayback=0,latestSelect=null;
 window.__myTorboxLibraryVersion=VERSION;
 function playerOwnsScreen(){
 if(!ownedPlayback)return false;
@@ -203,14 +203,14 @@ if(typeof query!=='string'||query.indexOf(SESSION_PREFIX)!==0)return false;
 try{
 var data=JSON.parse(query.slice(SESSION_PREFIX.length));
 if(!data||!Array.isArray(data.tokens)||!data.tokens.length||data.tokens.length>64||!Number.isSafeInteger(data.expires)||data.expires<=Date.now()||data.expires>Date.now()+86460000||data.tokens.some(function(n,i,a){return typeof n!=='string'||!/^[a-f0-9]{32}$/.test(n)||a.indexOf(n)!==i;}))throw Error('invalid setup');
-localStorage.setItem(sessionPoolKey,JSON.stringify({tokens:data.tokens,expires:data.expires}));manualSetupConfirmed=true;if(sessionSetupWait)sessionSetupWait();
+localStorage.setItem(sessionPoolKey,JSON.stringify({tokens:data.tokens,expires:data.expires}));if(sessionSetupWait){manualSetupConfirmed=true;sessionSetupWait();}
 }catch(e){}return true;
 }
 function takeSessionToken(){try{var data=JSON.parse(localStorage.getItem(sessionPoolKey)||'null');if(!data||data.expires<=Date.now()||!Array.isArray(data.tokens)||!data.tokens.length)return null;var n=data.tokens.shift();if(!/^[a-f0-9]{32}$/.test(n))return null;localStorage.setItem(sessionPoolKey,JSON.stringify(data));return n;}catch(e){return null;}}
 async function manualSessionToken(){
 // Reconfirm the native pool once after each Lampa load; APK data may have changed.
 var n=manualSetupConfirmed?takeSessionToken():null;if(n)return n;
-await new Promise(function(resolve){var timer=setTimeout(done,3500);function done(){clearTimeout(timer);sessionSetupWait=null;resolve();}sessionSetupWait=done;try{AndroidJS.openBrowser('ney-tv-session://request');}catch(e){done();}});
+await new Promise(function(resolve){var timer=setTimeout(done,3500);function done(){clearTimeout(timer);sessionSetupWait=null;resolve();}sessionSetupWait=done;try{AndroidJS.openBrowser('ney-tv-session://request?fresh='+Date.now());}catch(e){done();}});
 return takeSessionToken();
 }
 function installResumeBridge(){
