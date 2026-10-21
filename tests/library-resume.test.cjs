@@ -12,7 +12,7 @@ test('movie resume shows the saved file under the requested localized title with
  const t={id:44,name:'Несчастный случай (Accident Man) (2018).mkv',files:[{id:1,name:'Accident.Man.2018.mkv',size:24e9}]};
  const x=setup([t],[{key:'44',file:'1',time:Date.now()}]);await x.hooks.resumeLibrary({t:'Несчастный случай'});
  assert.equal(x.searches.length,0);assert.equal(x.dialogs.length,1);
- assert.match(x.dialogs[0].title,/^Несчастный случай · v1\.3\.4$/);
+ assert.match(x.dialogs[0].title,/^Несчастный случай · v1\.4\.0$/);
  assert.equal(x.dialogs[0].items[0].title,'Видео 1');assert.equal(x.dialogs[0].items[0].file.id,1);
  assert.match(x.dialogs[0].items[0].subtitle,/Выбранное видео/);
 });
@@ -83,4 +83,31 @@ test('movies use the same native Android ViMu launch route as series',async()=>{
  x.context.Lampa.Player={play:d=>{launch=d;},playlist(){},callback(){}};
  const file={id:1,name:'Example.mkv',size:1e9};await x.hooks.play({id:11,name:'Example'},file,[file]);
  assert.equal(launch.launch_player,'android');assert.equal(launch.playlist.length,1);
+});
+test('recovery chooses the exact filename, not the history file',async()=>{
+ const t={id:10,name:'Example',files};const x=setup([t],[{key:'10',file:'2',time:Date.now()}]);
+ await x.hooks.resumeLibrary({t:'Example',f:files[3].name,z:120000});
+ assert.equal(x.dialogs.at(-1).items[0].file.id,4);
+ await x.hooks.resumeLibrary({t:'Example',f:'Missing.S01E99.mkv',z:120000});
+ assert.match(x.dialogs.at(-1).items[0].title,/серия не найдена/);
+});
+test('session handoff contains only bounded owned filenames and sizes, never stream URLs or keys',async()=>{
+ const x=setup([]);let handoff,launch;
+ x.context.AndroidJS={openBrowser:u=>handoff=u};
+ x.context.fetch=async()=>({ok:true,json:async()=>({success:true,data:'https://cdn.example.invalid/movie.mkv'})});
+ x.context.Lampa.Player={play:d=>launch=d,playlist(){},callback(){}};
+ const f={id:1,name:'Example.mkv',size:1e9};await x.hooks.play({id:11,name:'Example'},f,[f],{t:'Example',n:'a'.repeat(32)});
+ const payload=JSON.parse(new URL(handoff).searchParams.get('data'));assert.equal(payload.selected,'Example.mkv');
+ assert.equal(payload.files.length,1);assert.deepEqual(Object.keys(payload.files[0]).sort(),['name','size']);
+ assert.ok(!JSON.stringify(payload).includes('https'));assert.ok(!JSON.stringify(payload).includes('fixture-key'));assert.ok(launch);
+});
+test('recovery supplies a saved position and restores the native resume preference',async()=>{
+ const x=setup([]);const changes=[];let launch;
+ x.context.AndroidJS={storageChange:j=>changes.push(JSON.parse(j))};x.context.Lampa.Storage={field:()=> 'ask'};
+ x.context.fetch=async()=>({ok:true,json:async()=>({success:true,data:'https://cdn.example.invalid/movie.mkv'})});
+ x.context.Lampa.Player={play:d=>launch=d,playlist(){},callback(){}};
+ const f={id:1,name:'Example.mkv',size:1e9};await x.hooks.play({id:11,name:'Example'},f,[f],{t:'Example',f:f.name,z:123000});
+ assert.equal(launch.timeline.time,123);assert.equal(launch.position,123);assert.equal(changes[0].value,'continue');
+ await new Promise(r=>setTimeout(r,1100));assert.equal(changes.at(-1).value,'ask');
+ for(const req of [{t:'Example',n:'invalid'},{t:'Example',f:'https://evil'},{t:'Example',z:1200},{t:'Example',f:'Example.mkv',z:-1}])assert.throws(()=>x.hooks.parseResume('__NEY_TORBOX__:'+JSON.stringify(req)));
 });
