@@ -1,4 +1,4 @@
-/* My TorBox library for Lampa. v1.1 — episode playlists */
+/* My TorBox library for Lampa. v1.1.1 — keep player controls after launch */
 (function(){
 'use strict';
 if(window.__myTorboxLibrary01)return; window.__myTorboxLibrary01=true;
@@ -120,7 +120,9 @@ var playbackRequest=null;
 async function play(torrent,file,allFiles){
 if(playbackRequest)playbackRequest.abort();
 var ctl=new AbortController();playbackRequest=ctl;
-if(Lampa.Loading)Lampa.Loading.start(function(){ctl.abort();},'Подготавливаю воспроизведение…');
+var loadingActive=false;
+function stopLoading(){if(loadingActive){loadingActive=false;Lampa.Loading.stop();}}
+if(Lampa.Loading){Lampa.Loading.start(function(){ctl.abort();},'Подготавливаю воспроизведение…');loadingActive=true;}
 try{
 var available=Array.isArray(allFiles)?allFiles:(Array.isArray(torrent.files)?torrent.files:[]);
 var ordered=orderedVideos(available),cache=cachedMeta(torrent),meta=cache&&cache.data;
@@ -140,7 +142,7 @@ var cursor=1;
 await Promise.all(Array.from({length:Math.min(3,queue.length-1)},async function(){
 while(cursor<queue.length&&!ctl.signal.aborted){var index=cursor++;try{resolved[index]=await item(queue[index]);}catch(e){resolved[index]=null;}}
 }));
-if(ctl.signal.aborted){if(playbackRequest===ctl)filesView(torrent,available);return;}
+if(ctl.signal.aborted){if(playbackRequest===ctl){stopLoading();filesView(torrent,available);}return;}
 var failed=resolved.findIndex(function(v){return !v;});
 var playlist=failed<0?resolved:resolved.slice(0,failed);
 if(failed>=0)toast('Следующая недоступная серия не будет пропущена. Её можно будет открыть из списка.');
@@ -148,13 +150,15 @@ if(failed>=0)toast('Следующая недоступная серия не б
 if(serial&&queue.length>1)playlist.forEach(function(cfg){cfg.launch_player='lampa';});
 var launch=Object.assign({},playlist[0],{playlist:playlist});
 if(playlist.length>1&&Lampa.Storage)Lampa.Storage.set('playlist_next',true);
-if(Lampa.Loading)Lampa.Loading.stop();
+// Loading.stop restores the old controller even if its layer was already removed.
+// Release it once, BEFORE Player.play takes ownership of the remote.
+stopLoading();
 if(Lampa.Player.play(launch)===false)throw Error('Плеер не запущен');
 if(typeof Lampa.Player.playlist==='function')Lampa.Player.playlist(playlist);
 remember(torrent,file);
 Lampa.Player.callback(function(){filesView(torrent,available);});
-}catch(e){if(!ctl.signal.aborted)toast('Воспроизведение: '+e.message);if(playbackRequest===ctl)filesView(torrent,allFiles||torrent.files||[file]);}
-finally{if(playbackRequest===ctl){playbackRequest=null;if(Lampa.Loading)Lampa.Loading.stop();}}
+}catch(e){if(!ctl.signal.aborted)toast('Воспроизведение: '+e.message);if(playbackRequest===ctl){stopLoading();filesView(torrent,allFiles||torrent.files||[file]);}}
+finally{if(playbackRequest===ctl){playbackRequest=null;stopLoading();}}
 }
 function addMenu(){
 if(!window.jQuery&&!window.$){setTimeout(addMenu,500);return;}
