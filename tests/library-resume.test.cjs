@@ -1,5 +1,5 @@
 const test=require('node:test'),assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs');
-const source=fs.readFileSync('torbox-library.js','utf8').replace('boot();\n})();','globalThis.hooks={parseResume,resumeMatch,resumeLibrary,installResumeBridge};\n})();');
+const source=fs.readFileSync('torbox-library.js','utf8').replace('boot();\n})();','globalThis.hooks={parseResume,resumeMatch,resumeLibrary,installResumeBridge,resumeNames,play};\n})();');
 function setup(torrents,history=[]){
  const calls=[],dialogs=[],searches=[],notices=[];
  const storage={mytorbox_recent_v1:JSON.stringify(history)};
@@ -12,12 +12,12 @@ test('movie resume shows the saved file under the requested localized title with
  const t={id:44,name:'Несчастный случай (Accident Man) (2018).mkv',files:[{id:1,name:'Accident.Man.2018.mkv',size:24e9}]};
  const x=setup([t],[{key:'44',file:'1',time:Date.now()}]);await x.hooks.resumeLibrary({t:'Несчастный случай'});
  assert.equal(x.searches.length,0);assert.equal(x.dialogs.length,1);
- assert.match(x.dialogs[0].title,/^Несчастный случай · v1\.3\.1$/);
+ assert.match(x.dialogs[0].title,/^Несчастный случай · v1\.3\.3$/);
  assert.equal(x.dialogs[0].items[0].title,'Видео 1');assert.equal(x.dialogs[0].items[0].file.id,1);
  assert.match(x.dialogs[0].items[0].subtitle,/Выбранное видео/);
 });
 test('resume uses only owned TorBox uploads and puts the requested S01E04 first without playback',async()=>{
- const t={id:10,name:'Special.Ops.Lioness.S01.1080p',files};const x=setup([t]);
+ const t={id:10,name:'Спецназ: Львица Special Ops Lioness Сезон 1 1080p',files};const x=setup([t]);
  await x.hooks.resumeLibrary({t:'Спецназ: Львица',s:1,e:4});
  assert.equal(x.calls.length,1);assert.equal(x.dialogs.length,1);assert.equal(x.dialogs[0].items[0].file.id,4);
  assert.match(x.dialogs[0].items[0].subtitle,/Запрошенная серия/);assert.equal(x.dialogs[0].items.length,5);
@@ -25,17 +25,55 @@ test('resume uses only owned TorBox uploads and puts the requested S01E04 first 
 test('continue without episode uses the saved last file; explicit request wins over history',async()=>{
  const t={id:10,name:'Friends.S01.1080p',files:files.map(f=>({...f,name:f.name.replace('Special.Ops.Lioness','Friends')}))};
  const x=setup([t],[{key:'10',file:'2',time:Date.now()}]);
- await x.hooks.resumeLibrary({t:'Друзья'});assert.equal(x.dialogs.at(-1).items[0].file.id,2);
- await x.hooks.resumeLibrary({t:'Друзья',s:1,e:4});assert.equal(x.dialogs.at(-1).items[0].file.id,4);
+ await x.hooks.resumeLibrary({t:'Friends'});assert.equal(x.dialogs.at(-1).items[0].file.id,2);
+ await x.hooks.resumeLibrary({t:'Friends',s:1,e:4});assert.equal(x.dialogs.at(-1).items[0].file.id,4);
 });
 test('missing titles never fall back to the Lampa catalog; duplicate downloads require selection',async()=>{
  const x=setup([{id:1,name:'Other.S01',files}]);await x.hooks.resumeLibrary({t:'Львица'});
- assert.equal(x.searches.length,0);assert.equal(x.dialogs.length,0);assert.match(x.notices.at(-1),/не найден/);
- const y=setup([{id:1,name:'Lioness.S01',files},{id:2,name:'Lioness.S01',files}]);await y.hooks.resumeLibrary({t:'Львица',s:1,e:4});
- assert.equal(y.dialogs[0].items.length,2);assert.ok(y.dialogs[0].items.every(i=>i.torrent));
+ assert.equal(x.searches.length,0);assert.equal(x.dialogs.length,1);assert.match(x.dialogs[0].items[0].title,/не найден/);
+ const y=setup([{id:1,name:'Львица Lioness Сезон 1',files},{id:2,name:'Львица Lioness Сезон 1',files}]);await y.hooks.resumeLibrary({t:'Львица',s:1,e:4});
+ assert.match(y.dialogs[0].items[0].title,/несколько загрузок/);
 });
 test('invalid seasons and unknown payload fields are rejected; ordinary searches pass through unchanged',()=>{
  const x=setup([]);x.hooks.installResumeBridge();
  const o={input:'Горячие головы'};assert.equal(x.context.Lampa.Search.open(o),42);assert.equal(x.searches[0],o);
  for(const req of [{t:'Львица',s:0},{t:'Львица',e:-1},{t:'Львица',url:'https://evil'},{t:'Львица',play:true},{t:[]},{t:'x'.repeat(101)}])assert.throws(()=>x.hooks.parseResume('__NEY_TORBOX__:'+JSON.stringify(req)));
+});
+test('bilingual titles match generically and sequels do not collide',()=>{
+ const x=setup([]);
+ for(const [ru,en] of [['Друзья','Friends'],['Поступь хаоса','Chaos Walking'],['Грань будущего','Edge of Tomorrow'],['Надежда','Hope']]){
+  const t={name:`${ru} ${en} Сезон 1 [2020, WEB-DL]`};
+  assert.equal(x.hooks.resumeMatch(t,ru),true);assert.equal(x.hooks.resumeMatch(t,en),true);
+ }
+ assert.equal(x.hooks.resumeMatch({name:'John Wick 2 (2017)'},'John Wick'),false);
+ assert.equal(x.hooks.resumeMatch({name:'Hope 2 (2026)'},'Other 2'),false);
+});
+test('no remembered file never starts an arbitrary first episode or movie',async()=>{
+ for(const files2 of [files,[{id:1,name:'Movie.mkv',size:1e9}]]){
+  const x=setup([{id:1,name:'Example',files:files2}]);await x.hooks.resumeLibrary({t:'Example'});
+  assert.match(x.dialogs.at(-1).items[0].title,/Нет истории/);
+ }
+});
+test('Search.open replacement retains the library guard',async()=>{
+ const x=setup([]);x.hooks.installResumeBridge();
+ let replaced=0;x.context.Lampa.Search.open=()=>{replaced++;return 7;};
+ assert.equal(x.context.Lampa.Search.open({input:'ordinary'}),7);
+ x.context.Lampa.Search.open({input:'__NEY_TORBOX__:{"t":"Missing"}'});
+ await new Promise(r=>setImmediate(r));assert.equal(replaced,1);assert.match(x.dialogs.at(-1).items[0].title,/не найден/);
+});
+test('recent history selects the most recently watched owned record; absent yesterday stops',async()=>{
+ const x=setup([{id:1,name:'First',files},{id:2,name:'Second',files}],[{key:'1',file:'3',time:Date.now()-5000},{key:'2',file:'4',time:Date.now()}]);
+ await x.hooks.resumeLibrary({t:'@recent'});assert.equal(x.dialogs.at(-1).items[0].file.id,4);assert.match(x.dialogs.at(-1).title,/Second/);
+ await x.hooks.resumeLibrary({t:'@yesterday'});assert.match(x.dialogs.at(-1).items[0].title,/Нет истории/);
+});
+test('234-episode launch resolves one CDN link and keeps the complete ordered ViMu playlist',async()=>{
+ const files=Array.from({length:234},(_,i)=>({id:i+1,name:`Example.S${String(Math.floor(i/24)+1).padStart(2,'0')}E${String(i%24+1).padStart(2,'0')}.mkv`,size:1e9}));
+ const x=setup([]);let requests=0,launch,queue;
+ x.context.fetch=async()=>{requests++;return {ok:true,json:async()=>({success:true,data:'https://cdn.example.invalid/fixture.mkv'})};};
+ x.context.Lampa.Player={play:d=>{launch=d;},playlist:q=>queue=q,callback:()=>{}};
+ x.context.Lampa.Storage={set(){}};
+ await x.hooks.play({id:10,name:'Example',files},files[2],files);
+ assert.equal(requests,1);assert.equal(queue.length,232);assert.equal(launch.playlist,queue);
+ assert.equal(queue[0].episode,3);assert.equal(queue[1].episode,4);
+ const next=new URL(queue[1].url);assert.equal(next.origin,'https://api.torbox.app');assert.equal(next.searchParams.get('redirect'),'true');assert.equal(next.searchParams.get('file_id'),'4');
 });
