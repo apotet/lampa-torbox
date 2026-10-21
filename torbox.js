@@ -1,7 +1,33 @@
-/* My TorBox library for Lampa. v1.1.2 — dismiss selection without Back callbacks */
+/* My TorBox library for Lampa. v1.2.0 — own playback/dialog lifecycle */
 (function(){
 'use strict';
 if(window.__myTorboxLibrary01)return; window.__myTorboxLibrary01=true;
+var VERSION='1.2.0',playbackSession=0,ownedPlayback=0,latestSelect=null;
+window.__myTorboxLibraryVersion=VERSION;
+function playerOwnsScreen(){
+if(!ownedPlayback)return false;
+var data=typeof Lampa.Player.playdata==='function'?Lampa.Player.playdata():null;
+return data?data.mytorbox_session===ownedPlayback:typeof Lampa.Player.opened!=='function'||Lampa.Player.opened();
+}
+function restorePlayerControls(){if(playerOwnsScreen()){dismissSelect();if(typeof Lampa.Player.toggle==='function')Lampa.Player.toggle();}}
+function showLibraryDialog(options){
+if(playerOwnsScreen()){restorePlayerControls();return;}
+options.mytorbox_dialog=true;Lampa.Select.show(options);
+}
+function bindPlaybackLifecycle(){
+if(Lampa.Player.listener&&Lampa.Player.listener.follow){
+Lampa.Player.listener.follow('start',function(data){if(data&&data.mytorbox_session){ownedPlayback=data.mytorbox_session;dismissSelect();}});
+Lampa.Player.listener.follow('ready',function(data){if(data&&data.mytorbox_session===ownedPlayback)restorePlayerControls();});
+}
+if(Lampa.Select.listener&&Lampa.Select.listener.follow)Lampa.Select.listener.follow('fullshow',function(event){
+latestSelect=event&&event.active;
+if(event&&event.active&&event.active.mytorbox_dialog&&playerOwnsScreen()){
+var dialog=event.active,session=ownedPlayback;
+// fullshow fires before Select installs its controller: reclaim only afterwards.
+setTimeout(function(){if(latestSelect===dialog&&ownedPlayback===session)restorePlayerControls();},0);
+}
+});
+}
 function toast(s){if(window.Lampa&&Lampa.Noty)Lampa.Noty.show(s);else console.log(s);}
 function token(){try{return atob(localStorage.getItem('torbox_api_key_b64')||'');}catch(e){return '';}}
 function proxy(){return localStorage.getItem('torbox_proxy_url')||'https://my-torbox-proxy.slonce70.workers.dev';}
@@ -17,7 +43,7 @@ function openLibrary(controller){returnController=controller;list();}
 // Select.close() means Back: it invokes onBack and can reopen the library.
 // Selection already hides the dialog; dismiss without navigation callbacks.
 function dismissSelect(){if(typeof Lampa.Select.closeAll==='function')Lampa.Select.closeAll();else Lampa.Select.hide();}
-function choose(title,items,callback){if(!items.length){toast('Пусто');return;}Lampa.Select.show({title:title,items:items,onSelect:function(item){dismissSelect();callback(item);},onBack:function(){Lampa.Controller.toggle(returnController);}});}
+function choose(title,items,callback){if(!items.length){toast('Пусто');return;}showLibraryDialog({title:title,items:items,onSelect:function(item){dismissSelect();callback(item);},onBack:function(){Lampa.Controller.toggle(returnController);}});}
 function textSize(n){if(!n)return '';return ' · '+(Number(n)/1073741824).toFixed(1)+' ГБ';}
 var recentKey='mytorbox_recent_v1';
 function recent(){try{var r=JSON.parse(localStorage.getItem(recentKey)||'[]');return Array.isArray(r)?r.filter(function(v){return v&&typeof v.key==='string'&&isFinite(v.time)&&v.time>0;}):[];}catch(e){return [];}}
@@ -94,7 +120,7 @@ var items=[{title:'⌕ Поиск по библиотеке',subtitle:libraryQue
 if(libraryQuery)items.push({title:'Показать все загрузки',action:'clear'});
 if(!arr.length)items.push({title:'Ничего не найдено',subtitle:'Измени запрос или покажи все загрузки',noenter:true});
 arr.forEach(function(t){var n=cleanName(t.name),c=cachedMeta(t),d=c&&c.data;items.push({title:safe(d?(d.title||d.name):n.title),subtitle:(lastPlayed(t,r)?'Недавно смотрели · ':'')+(n.year?n.year+' · ':'')+safe(t.download_state||t.status||'')+textSize(t.size)+'<br><small>'+safe(t.name||'')+'</small>',torrent:t,clean:n});});
-Lampa.Select.show({title:'Мой TorBox · '+arr.length+(libraryQuery?' / '+libraryData.length:''),items:items,onDraw:function(row,item){drawCard(row,item,view,drawn++<12);},onFocus:function(item,row){var $=window.jQuery||window.$;if($)drawCard($(row),item,view,true);},onSelect:function(item){libraryView++;dismissSelect();if(item.action==='search')searchLibrary();else if(item.action==='clear'){libraryQuery='';showLibrary();}else files(item.torrent);},onBack:function(){libraryView++;Lampa.Controller.toggle(returnController);}});}
+showLibraryDialog({title:'Мой TorBox · '+arr.length+' · v'+VERSION+(libraryQuery?' / '+libraryData.length:''),items:items,onDraw:function(row,item){drawCard(row,item,view,drawn++<12);},onFocus:function(item,row){var $=window.jQuery||window.$;if($)drawCard($(row),item,view,true);},onSelect:function(item){libraryView++;dismissSelect();if(item.action==='search')searchLibrary();else if(item.action==='clear'){libraryQuery='';showLibrary();}else files(item.torrent);},onBack:function(){libraryView++;Lampa.Controller.toggle(returnController);}});}
 function list(){toast('Загружаю библиотеку TorBox…');api('torrents/mylist?limit=1000&bypass_cache=true').then(function(data){
 libraryData=Array.isArray(data)?data:(!data?[]:[data]);showLibrary();
 }).catch(function(e){toast('Библиотека: '+e.message);});}
@@ -109,7 +135,7 @@ function filesView(torrent,arr){var vids=arr.filter(function(f){return /\.(mkv|m
 var last=lastPlayed(torrent,recent());
 if(last)vids.sort(function(a,b){return Number(fileKey(b)===last.file)-Number(fileKey(a)===last.file);});
 var entries=vids.map(function(f,i){return {title:safe(episodeTitle(f,i)),subtitle:((last&&fileKey(f)===last.file)?'▶ Последний запуск · ':'')+textSize(f.size).trim()+'<br><small>'+safe((f.name||f.path||'').split('/').pop())+'</small>',file:f};});
-Lampa.Select.show({title:safe(cleanName(torrent.name).title),items:entries,onDraw:function(row){var $=window.jQuery||window.$;if($)$(row).addClass('mytorbox-file');},onSelect:function(item){dismissSelect();play(torrent,item.file,arr);},onBack:function(){showLibrary();}});}
+showLibraryDialog({title:safe(cleanName(torrent.name).title)+' · v'+VERSION,items:entries,onDraw:function(row){var $=window.jQuery||window.$;if($)$(row).addClass('mytorbox-file');},onSelect:function(item){dismissSelect();play(torrent,item.file,arr);},onBack:function(){showLibrary();}});}
 function episodeNumbers(f){var raw=String(f.name||f.path||'');
 var m=raw.match(/S(\d{1,2})[ ._-]*E(\d{1,3})/i)||raw.match(/\b(\d{1,2})x(\d{1,3})\b/i);
 if(m)return {season:Number(m[1]),episode:Number(m[2])};
@@ -123,6 +149,7 @@ var playbackRequest=null;
 async function play(torrent,file,allFiles){
 if(playbackRequest)playbackRequest.abort();
 var ctl=new AbortController();playbackRequest=ctl;
+var session=++playbackSession;
 var loadingActive=false;
 function stopLoading(){if(loadingActive){loadingActive=false;Lampa.Loading.stop();}}
 if(Lampa.Loading){Lampa.Loading.start(function(){ctl.abort();},'Подготавливаю воспроизведение…');loadingActive=true;}
@@ -150,18 +177,19 @@ var failed=resolved.findIndex(function(v){return !v;});
 var playlist=failed<0?resolved:resolved.slice(0,failed);
 if(failed>=0)toast('Следующая недоступная серия не будет пропущена. Её можно будет открыть из списка.');
 // Keep a season in the foreground: TCL may terminate Lampa behind ViMu.
-if(serial&&queue.length>1)playlist.forEach(function(cfg){cfg.launch_player='lampa';});
+if(serial&&queue.length>1)playlist.forEach(function(cfg){cfg.launch_player='lampa';cfg.mytorbox_session=session;});
 var launch=Object.assign({},playlist[0],{playlist:playlist});
 if(playlist.length>1&&Lampa.Storage)Lampa.Storage.set('playlist_next',true);
 // Loading.stop restores the old controller even if its layer was already removed.
 // Release it once, BEFORE Player.play takes ownership of the remote.
 stopLoading();
 dismissSelect();
+ownedPlayback=launch.mytorbox_session||0;
 if(Lampa.Player.play(launch)===false)throw Error('Плеер не запущен');
 if(typeof Lampa.Player.playlist==='function')Lampa.Player.playlist(playlist);
 remember(torrent,file);
-Lampa.Player.callback(function(){filesView(torrent,available);});
-}catch(e){if(!ctl.signal.aborted)toast('Воспроизведение: '+e.message);if(playbackRequest===ctl){stopLoading();filesView(torrent,allFiles||torrent.files||[file]);}}
+Lampa.Player.callback(function(){if(ownedPlayback===session)ownedPlayback=0;filesView(torrent,available);});
+}catch(e){if(ownedPlayback===session)ownedPlayback=0;if(!ctl.signal.aborted)toast('Воспроизведение: '+e.message);if(playbackRequest===ctl){stopLoading();filesView(torrent,allFiles||torrent.files||[file]);}}
 finally{if(playbackRequest===ctl){playbackRequest=null;stopLoading();}}
 }
 function addMenu(){
@@ -195,6 +223,7 @@ else menu.prepend(button);
 if(history.length)history.insertAfter(button);
 }
 function boot(){if(!window.Lampa||!Lampa.SettingsApi||!Lampa.Select){setTimeout(boot,500);return;}
+bindPlaybackLifecycle();
 var $=window.jQuery||window.$;if($&&!$('#mytorbox-card-style').length)$('head').append('<style id="mytorbox-card-style">.mytorbox-card{display:block!important;position:relative!important;box-sizing:border-box!important;min-height:7.2em!important;padding:1em 1.2em 1em 6.5em!important;overflow:hidden!important;white-space:normal!important}.mytorbox-card .mytorbox-poster{position:absolute!important;left:1em;top:50%;transform:translateY(-50%);width:4.2em;height:6.1em;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.1);border-radius:.35em;overflow:hidden}.mytorbox-card .mytorbox-poster img{width:100%;height:100%;object-fit:cover}.mytorbox-card .selectbox-item__title,.mytorbox-card .selectbox-item__subtitle{display:block!important;position:relative!important;box-sizing:border-box!important;width:100%!important;max-width:100%!important;min-width:0!important;margin-left:0!important;white-space:normal!important;overflow:hidden!important;overflow-wrap:break-word!important;word-break:normal!important}.mytorbox-card .selectbox-item__title{line-height:1.3!important;display:-webkit-box!important;-webkit-box-orient:vertical;-webkit-line-clamp:2}.mytorbox-card .selectbox-item__subtitle{line-height:1.35!important;font-size:.8em!important;max-height:3.9em;opacity:.8}.mytorbox-card .selectbox-item__subtitle small{display:block!important;font-size:.85em!important;white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important;max-width:100%!important;opacity:.65} .mytorbox-file{box-sizing:border-box!important;padding:.65em 1.1em!important;min-height:4.3em!important;overflow:hidden!important}.mytorbox-file .selectbox-item__title,.mytorbox-file .selectbox-item__subtitle{display:block!important;width:100%!important;max-width:100%!important;min-width:0!important;overflow:hidden!important;white-space:normal!important;overflow-wrap:anywhere!important}.mytorbox-file .selectbox-item__title{font-size:1em!important;font-weight:600!important;line-height:1.25!important}.mytorbox-file .selectbox-item__subtitle{font-size:.75em!important;line-height:1.3!important;opacity:.8}.mytorbox-file .selectbox-item__subtitle small{display:block!important;font-size:.85em!important;white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important;opacity:.65}</style>');
 Lampa.SettingsApi.addComponent({component:'mytorbox_library',name:'Мой TorBox',icon:'<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h18v13H3zM3 7l4-4h10l4 4M8 12h8"/></svg>'});
 Lampa.SettingsApi.addParam({component:'mytorbox_library',param:{name:'mytorbox_open',type:'button'},field:{name:'Открыть библиотеку TorBox',description:'Торренты и файлы, добавленные в TorBox, включая ручные загрузки'},onChange:function(){openLibrary('settings');}});
