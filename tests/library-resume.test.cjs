@@ -12,7 +12,7 @@ test('movie resume shows the saved file under the requested localized title with
  const t={id:44,name:'Несчастный случай (Accident Man) (2018).mkv',files:[{id:1,name:'Accident.Man.2018.mkv',size:24e9}]};
  const x=setup([t],[{key:'44',file:'1',time:Date.now()}]);await x.hooks.resumeLibrary({t:'Несчастный случай'});
  assert.equal(x.searches.length,0);assert.equal(x.dialogs.length,1);
- assert.match(x.dialogs[0].title,/^Несчастный случай · v1\.5\.1$/);
+ assert.match(x.dialogs[0].title,/^Несчастный случай · v1\.5\.2$/);
  assert.equal(x.dialogs[0].items[0].title,'Видео 1');assert.equal(x.dialogs[0].items[0].file.id,1);
  assert.match(x.dialogs[0].items[0].subtitle,/Выбранное видео/);
 });
@@ -130,7 +130,7 @@ test('position recovery stops rather than launching when the timeline checkpoint
 
 test('remote launch obtains a local token pool once, registers each selected file, and never searches the catalog',async()=>{
  const x=setup([]);x.hooks.installResumeBridge();x.context.localStorage.setItem('mytorbox_ney_tokens_v1',JSON.stringify({tokens:['c'.repeat(32)],expires:Date.now()+60000}));let requests=0;const handoffs=[],tokens=['a'.repeat(32),'b'.repeat(32)];
- x.context.AndroidJS={openBrowser:u=>{if(u==='ney-tv-session://request'){requests++;x.context.Lampa.Search.open({input:'__NEY_SESSION_SETUP__:'+JSON.stringify({tokens,expires:Date.now()+60000})});}else handoffs.push(u);}};
+ x.context.AndroidJS={openBrowser:u=>{if(u.startsWith('ney-tv-session://request?fresh=')){requests++;x.context.Lampa.Search.open({input:'__NEY_SESSION_SETUP__:'+JSON.stringify({tokens,expires:Date.now()+60000})});}else handoffs.push(u);}};
  x.context.fetch=async()=>({ok:true,json:async()=>({success:true,data:'https://cdn.example.invalid/movie.mkv'})});
  let launches=0;x.context.Lampa.Player={play:()=>launches++,playlist(){},callback(){}};
  const f={id:1,name:'Example.mkv',size:1e9};await x.hooks.play({id:11,name:'Example'},f,[f]);await x.hooks.play({id:11,name:'Example'},f,[f]);
