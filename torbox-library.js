@@ -211,7 +211,7 @@ async function manualSessionToken(){
 // Reconfirm the native pool once after each Lampa load; APK data may have changed.
 var n=manualSetupConfirmed?takeSessionToken():null;if(n)return n;
 await new Promise(function(resolve){var timer=setTimeout(done,3500);function done(){clearTimeout(timer);sessionSetupWait=null;resolve();}sessionSetupWait=done;try{AndroidJS.openBrowser('ney-tv-session://request?fresh='+Date.now());}catch(e){done();}});
-return takeSessionToken();
+return manualSetupConfirmed?takeSessionToken():null;
 }
 function installResumeBridge(){
 if(!Lampa.Search||typeof Lampa.Search.open!=='function'){setTimeout(installResumeBridge,500);return;}
