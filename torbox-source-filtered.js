@@ -14,7 +14,7 @@
  * --------------------------------------------------------------------- */
 
 try {
-  console.log('[TorBox] boot strap', '51.2.16');
+  console.log('[TorBox] boot strap', '51.2.17');
   (function () {
   'use strict';
 
@@ -24,7 +24,7 @@ try {
   window[PLUGIN_FLAG] = true;
 
   // ───────────────────────────── Constants / Config ─────────────────────────────
-  const VERSION = '51.2.16-episode-player';
+  const VERSION = '51.2.17-player-controls';
 
   const CONST = {
     CACHE_LIMIT: 128,
@@ -2422,6 +2422,12 @@ try {
       const controller = new AbortController();
       const cancel = () => controller.abort();
       abort.signal.addEventListener('abort', cancel);
+      let loadingActive = true;
+      const stopPlaybackLoading = () => {
+        if (!loadingActive) return;
+        loadingActive = false;
+        Lampa.Loading.stop();
+      };
       Lampa.Loading.start(cancel, 'Подготавливаю серии…');
 
       try {
@@ -2451,7 +2457,7 @@ try {
         // Only the launch item owns the array (no circular playlist objects).
         const launchConfig = Object.assign({}, playbackConfig, { playlist });
         if (playlist.length > 1 && Lampa.Storage?.set) Lampa.Storage.set('playlist_next', true);
-        Lampa.Loading.stop();
+        stopPlaybackLoading();
 
         const startResult = Lampa.Player.play(launchConfig);
         playbackStarted = startResult !== false;
@@ -2480,6 +2486,7 @@ try {
           if (typeof onSuccess === 'function') onSuccess({ torrentData, file: playbackFile, changed });
         });
       } catch (e) {
+        stopPlaybackLoading();
         if (!playbackStarted) {
           const reverted = revertPendingPlayback();
           if (reverted && state.view === 'torrents') build();
@@ -2488,7 +2495,7 @@ try {
         if (e?.type !== 'cancel' && e?.name !== 'AbortError') ErrorHandler.show(e.type || 'error', e);
       } finally {
         abort.signal.removeEventListener('abort', cancel);
-        Lampa.Loading.stop();
+        stopPlaybackLoading();
         if (typeof onFinally === 'function') onFinally({ started: playbackStarted, file, torrentData });
       }
     };
