@@ -1,8 +1,8 @@
-/* My TorBox library for Lampa. v1.2.0 — own playback/dialog lifecycle */
+/* My TorBox library for Lampa. v1.2.2 — native ViMu episode playlist */
 (function(){
 'use strict';
 if(window.__myTorboxLibrary01)return; window.__myTorboxLibrary01=true;
-var VERSION='1.2.0',playbackSession=0,ownedPlayback=0,latestSelect=null;
+var VERSION='1.2.2',playbackSession=0,ownedPlayback=0,latestSelect=null;
 window.__myTorboxLibraryVersion=VERSION;
 function playerOwnsScreen(){
 if(!ownedPlayback)return false;
@@ -176,8 +176,9 @@ if(ctl.signal.aborted){if(playbackRequest===ctl){stopLoading();filesView(torrent
 var failed=resolved.findIndex(function(v){return !v;});
 var playlist=failed<0?resolved:resolved.slice(0,failed);
 if(failed>=0)toast('Следующая недоступная серия не будет пропущена. Её можно будет открыть из списка.');
-// Keep a season in the foreground: TCL may terminate Lampa behind ViMu.
-if(serial&&queue.length>1)playlist.forEach(function(cfg){cfg.launch_player='lampa';cfg.mytorbox_session=session;});
+// Pass the complete ordered queue to Android/ViMu in the launch payload.
+// ViMu advances locally, even when Android reclaims Lampa in the background.
+if(serial)playlist.forEach(function(cfg){cfg.launch_player='android';});
 var launch=Object.assign({},playlist[0],{playlist:playlist});
 if(playlist.length>1&&Lampa.Storage)Lampa.Storage.set('playlist_next',true);
 // Loading.stop restores the old controller even if its layer was already removed.
