@@ -12,7 +12,7 @@ test('movie resume shows the saved file under the requested localized title with
  const t={id:44,name:'Несчастный случай (Accident Man) (2018).mkv',files:[{id:1,name:'Accident.Man.2018.mkv',size:24e9}]};
  const x=setup([t],[{key:'44',file:'1',time:Date.now()}]);await x.hooks.resumeLibrary({t:'Несчастный случай'});
  assert.equal(x.searches.length,0);assert.equal(x.dialogs.length,1);
- assert.match(x.dialogs[0].title,/^Несчастный случай · v1\.4\.0$/);
+ assert.match(x.dialogs[0].title,/^Несчастный случай · v1\.4\.1$/);
  assert.equal(x.dialogs[0].items[0].title,'Видео 1');assert.equal(x.dialogs[0].items[0].file.id,1);
  assert.match(x.dialogs[0].items[0].subtitle,/Выбранное видео/);
 });
@@ -110,4 +110,13 @@ test('recovery supplies a saved position and restores the native resume preferen
  assert.equal(launch.timeline.time,123);assert.equal(launch.position,123);assert.equal(changes[0].value,'continue');
  await new Promise(r=>setTimeout(r,1100));assert.equal(changes.at(-1).value,'ask');
  for(const req of [{t:'Example',n:'invalid'},{t:'Example',f:'https://evil'},{t:'Example',z:1200},{t:'Example',f:'Example.mkv',z:-1}])assert.throws(()=>x.hooks.parseResume('__NEY_TORBOX__:'+JSON.stringify(req)));
+});
+
+test('startup recovery without a measured position preserves the native resume choice',async()=>{
+ const x=setup([]);const changes=[];let launch;
+ x.context.AndroidJS={storageChange:j=>changes.push(j)};
+ x.context.fetch=async()=>({ok:true,json:async()=>({success:true,data:'https://cdn.example.invalid/movie.mkv'})});
+ x.context.Lampa.Player={play:d=>launch=d,playlist(){},callback(){}};
+ const f={id:1,name:'Example.mkv',size:1e9};await x.hooks.play({id:11,name:'Example'},f,[f],{t:'Example',f:f.name});
+ assert.equal(changes.length,0);assert.equal(launch.position,undefined);assert.ok(launch);
 });
