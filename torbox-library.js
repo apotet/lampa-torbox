@@ -2,7 +2,7 @@
 (function(){
 'use strict';
 if(window.__myTorboxLibrary01)return; window.__myTorboxLibrary01=true;
-var VERSION='1.5.0',playbackSession=0,ownedPlayback=0,latestSelect=null;
+var VERSION='1.5.1',playbackSession=0,ownedPlayback=0,latestSelect=null;
 window.__myTorboxLibraryVersion=VERSION;
 function playerOwnsScreen(){
 if(!ownedPlayback)return false;
@@ -197,18 +197,19 @@ if(matches.length===1){await resumeFiles(matches[0],req,serial);return;}
 resumeError('library_ambiguous');
 }catch(e){if(serial===resumeSerial)resumeError('library_failed');}
 }
-var SESSION_PREFIX='__NEY_SESSION_SETUP__:',sessionPoolKey='mytorbox_ney_tokens_v1',sessionSetupWait=null;
+var SESSION_PREFIX='__NEY_SESSION_SETUP__:',sessionPoolKey='mytorbox_ney_tokens_v1',sessionSetupWait=null,manualSetupConfirmed=false;
 function acceptSessionSetup(query){
 if(typeof query!=='string'||query.indexOf(SESSION_PREFIX)!==0)return false;
 try{
 var data=JSON.parse(query.slice(SESSION_PREFIX.length));
 if(!data||!Array.isArray(data.tokens)||!data.tokens.length||data.tokens.length>64||!Number.isSafeInteger(data.expires)||data.expires<=Date.now()||data.expires>Date.now()+86460000||data.tokens.some(function(n,i,a){return typeof n!=='string'||!/^[a-f0-9]{32}$/.test(n)||a.indexOf(n)!==i;}))throw Error('invalid setup');
-localStorage.setItem(sessionPoolKey,JSON.stringify({tokens:data.tokens,expires:data.expires}));if(sessionSetupWait)sessionSetupWait();
+localStorage.setItem(sessionPoolKey,JSON.stringify({tokens:data.tokens,expires:data.expires}));manualSetupConfirmed=true;if(sessionSetupWait)sessionSetupWait();
 }catch(e){}return true;
 }
 function takeSessionToken(){try{var data=JSON.parse(localStorage.getItem(sessionPoolKey)||'null');if(!data||data.expires<=Date.now()||!Array.isArray(data.tokens)||!data.tokens.length)return null;var n=data.tokens.shift();if(!/^[a-f0-9]{32}$/.test(n))return null;localStorage.setItem(sessionPoolKey,JSON.stringify(data));return n;}catch(e){return null;}}
 async function manualSessionToken(){
-var n=takeSessionToken();if(n)return n;
+// Reconfirm the native pool once after each Lampa load; APK data may have changed.
+var n=manualSetupConfirmed?takeSessionToken():null;if(n)return n;
 await new Promise(function(resolve){var timer=setTimeout(done,3500);function done(){clearTimeout(timer);sessionSetupWait=null;resolve();}sessionSetupWait=done;try{AndroidJS.openBrowser('ney-tv-session://request');}catch(e){done();}});
 return takeSessionToken();
 }
@@ -294,7 +295,6 @@ var duration=Number(checkpoint.duration)||0,percent=duration>0?seconds/duration*
 checkpoint.handler(percent,seconds,duration);
 launch.timeline=Object.assign({},checkpoint,{time:seconds});launch.position=seconds;playlist[0]=Object.assign({},playlist[0],{timeline:launch.timeline,position:seconds});
 }
-console.log('[NEY session] bridge='+typeof window.AndroidJS+' open='+((window.AndroidJS&&typeof AndroidJS.openBrowser)||'none')+' recovery='+!!(resumeRequest&&resumeRequest.f));
 if(!(resumeRequest&&resumeRequest.f)&&window.AndroidJS&&typeof AndroidJS.openBrowser==='function'){
 var sessionNonce=resumeRequest&&resumeRequest.n?resumeRequest.n:await manualSessionToken();
 if(ctl.signal.aborted)return;
