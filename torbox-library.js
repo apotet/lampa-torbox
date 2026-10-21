@@ -1,8 +1,8 @@
-/* My TorBox library for Lampa. v1.4.1 — verified library continuation */
+/* My TorBox library for Lampa. v1.4.2 — verified library continuation */
 (function(){
 'use strict';
 if(window.__myTorboxLibrary01)return; window.__myTorboxLibrary01=true;
-var VERSION='1.4.1',playbackSession=0,ownedPlayback=0,latestSelect=null;
+var VERSION='1.4.2',playbackSession=0,ownedPlayback=0,latestSelect=null;
 window.__myTorboxLibraryVersion=VERSION;
 function playerOwnsScreen(){
 if(!ownedPlayback)return false;
@@ -267,7 +267,13 @@ if(failed>=0)toast('Следующая недоступная серия не б
 playlist.forEach(function(cfg){cfg.launch_player='android';});
 var launch=Object.assign({},playlist[0],{playlist:playlist});
 if(resumeRequest&&resumeRequest.f&&resumeRequest.z!=null){
-var seconds=resumeRequest.z/1000;launch.timeline=Object.assign({},launch.timeline||{},{time:seconds});launch.position=seconds;playlist[0]=Object.assign({},playlist[0],{timeline:launch.timeline,position:seconds});
+var seconds=resumeRequest.z/1000,checkpoint=launch.timeline;
+if(!checkpoint||typeof checkpoint.handler!=='function')throw Error('Не удалось сохранить точку продолжения');
+// Android.openPlayer re-reads Timeline.view(hash), overriding payload-only time.
+// Save the observed checkpoint through Lampa's normal timeline API first.
+var duration=Number(checkpoint.duration)||0,percent=duration>0?seconds/duration*100:(Number(checkpoint.percent)||0);
+checkpoint.handler(percent,seconds,duration);
+launch.timeline=Object.assign({},checkpoint,{time:seconds});launch.position=seconds;playlist[0]=Object.assign({},playlist[0],{timeline:launch.timeline,position:seconds});
 }
 if(resumeRequest&&resumeRequest.n&&window.AndroidJS&&typeof AndroidJS.openBrowser==='function'){
 var manifest={n:resumeRequest.n,t:resumeRequest.t,selected:String(file.name||file.path||'').split('/').pop(),files:queue.map(function(f){return {name:String(f.name||f.path||'').split('/').pop(),size:Number(f.size)||0};})};
