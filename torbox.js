@@ -1,4 +1,4 @@
-/* My TorBox library for Lampa. v1.0 */
+/* My TorBox library for Lampa. v1.1 — episode playlists */
 (function(){
 'use strict';
 if(window.__myTorboxLibrary01)return; window.__myTorboxLibrary01=true;
@@ -7,10 +7,11 @@ function token(){try{return atob(localStorage.getItem('torbox_api_key_b64')||'')
 function proxy(){return localStorage.getItem('torbox_proxy_url')||'https://my-torbox-proxy.slonce70.workers.dev';}
 function safe(v){return String(v==null?'':v).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
 function proxied(url){var u=new URL(proxy());u.searchParams.set('url',url);return u.toString();}
-async function api(route){var key=token();if(!key)throw Error('Сначала введи ключ в Настройки → TorBox');
+async function api(route,signal){var key=token();if(!key)throw Error('Сначала введи ключ в Настройки → TorBox');
 var ctl=new AbortController(),t=setTimeout(function(){ctl.abort();},25000);
+var cancel=function(){ctl.abort();};if(signal){signal.addEventListener('abort',cancel);if(signal.aborted)cancel();}
 try{var r=await fetch(proxied('https://api.torbox.app/v1/api/'+route),{headers:{'X-Api-Key':key},signal:ctl.signal});if(!r.ok)throw Error('TorBox HTTP '+r.status);
-var j=await r.json();if(j.success===false)throw Error(j.detail||j.error||'Ошибка TorBox');return j.data;}finally{clearTimeout(t);}}
+var j=await r.json();if(j.success===false)throw Error(j.detail||j.error||'Ошибка TorBox');return j.data;}finally{clearTimeout(t);if(signal)signal.removeEventListener('abort',cancel);}}
 var returnController='settings';
 function openLibrary(controller){returnController=controller;list();}
 function choose(title,items,callback){if(!items.length){toast('Пусто');return;}Lampa.Select.show({title:title,items:items,onSelect:function(item){Lampa.Select.close();callback(item);},onBack:function(){Lampa.Controller.toggle(returnController);}});}
@@ -105,14 +106,56 @@ function filesView(torrent,arr){var vids=arr.filter(function(f){return /\.(mkv|m
 var last=lastPlayed(torrent,recent());
 if(last)vids.sort(function(a,b){return Number(fileKey(b)===last.file)-Number(fileKey(a)===last.file);});
 var entries=vids.map(function(f,i){return {title:safe(episodeTitle(f,i)),subtitle:((last&&fileKey(f)===last.file)?'▶ Последний запуск · ':'')+textSize(f.size).trim()+'<br><small>'+safe((f.name||f.path||'').split('/').pop())+'</small>',file:f};});
-Lampa.Select.show({title:safe(cleanName(torrent.name).title),items:entries,onDraw:function(row){var $=window.jQuery||window.$;if($)$(row).addClass('mytorbox-file');},onSelect:function(item){Lampa.Select.close();play(torrent,item.file);},onBack:function(){showLibrary();}});}
-function play(torrent,file){toast('Получаю ссылку для воспроизведения…');
-api('torrents/requestdl?torrent_id='+encodeURIComponent(torrent.id)+'&file_id='+encodeURIComponent(file.id)+'&token='+encodeURIComponent(token())).then(function(link){
-if(typeof link!=='string'||!/^https:\/\//.test(link))throw Error('Нет ссылки для воспроизведения');
-var name=(file.name||file.path||torrent.name||'TorBox').split('/').pop();
-Lampa.Player.play({url:link,title:name,card:{title:name},movie:{title:name}});
+Lampa.Select.show({title:safe(cleanName(torrent.name).title),items:entries,onDraw:function(row){var $=window.jQuery||window.$;if($)$(row).addClass('mytorbox-file');},onSelect:function(item){Lampa.Select.close();play(torrent,item.file,arr);},onBack:function(){showLibrary();}});}
+function episodeNumbers(f){var raw=String(f.name||f.path||'');
+var m=raw.match(/S(\d{1,2})[ ._-]*E(\d{1,3})/i)||raw.match(/\b(\d{1,2})x(\d{1,3})\b/i);
+if(m)return {season:Number(m[1]),episode:Number(m[2])};
+var e=raw.match(/(?:серия|episode|ep)[ ._-]*(\d{1,3})/i);return e?{episode:Number(e[1])}:null;}
+function orderedVideos(arr){return arr.filter(function(f){var name=String(f.name||f.path||'');
+return /\.(mkv|mp4|avi|m4v|ts|mov|webm)$/i.test(name)&&!/(?:^|[\/\\ ._-])(?:samples?|trailers?|teasers?|extras?|featurettes?|тизер|трейлер)(?:[\/\\ ._-]|$)/i.test(name);
+}).slice().sort(function(a,b){var an=episodeNumbers(a),bn=episodeNumbers(b);
+if(an&&bn){var diff=(an.season||0)-(bn.season||0)||an.episode-bn.episode;if(diff)return diff;}
+return String(a.name||a.path||'').localeCompare(String(b.name||b.path||''),undefined,{numeric:true});});}
+var playbackRequest=null;
+async function play(torrent,file,allFiles){
+if(playbackRequest)playbackRequest.abort();
+var ctl=new AbortController();playbackRequest=ctl;
+if(Lampa.Loading)Lampa.Loading.start(function(){ctl.abort();},'Подготавливаю воспроизведение…');
+try{
+var available=Array.isArray(allFiles)?allFiles:(Array.isArray(torrent.files)?torrent.files:[]);
+var ordered=orderedVideos(available),cache=cachedMeta(torrent),meta=cache&&cache.data;
+var serial=!!((meta&&meta.media_type==='tv')||ordered.filter(function(f){return !!episodeNumbers(f);}).length>1);
+var selected=ordered.findIndex(function(f){return fileKey(f)===fileKey(file);});
+var queue=serial&&selected>=0?ordered.slice(selected):[file];
+var card=meta||{title:cleanName(torrent.name).title};
+if(serial&&!meta)card={name:cleanName(torrent.name).title,original_name:cleanName(torrent.name).title,media_type:'tv'};
+async function item(f){var link=await api('torrents/requestdl?torrent_id='+encodeURIComponent(torrent.id)+'&file_id='+encodeURIComponent(f.id)+'&token='+encodeURIComponent(token()),ctl.signal);
+if(typeof link!=='string'||!/^https?:\/\//i.test(link))throw Error('Нет ссылки для воспроизведения');
+var cfg={url:link,title:String(f.name||f.path||torrent.name||'TorBox').split('/').pop(),card:card,movie:card};
+var ep=episodeNumbers(f);if(ep){if(ep.season!=null)cfg.season=ep.season;cfg.episode=ep.episode;}
+if(Lampa.Timeline&&Lampa.Utils&&Lampa.Utils.hash)cfg.timeline=Lampa.Timeline.view(Lampa.Utils.hash('mytorbox:'+torrentKey(torrent)+':'+fileKey(f)));
+cfg.callback=function(){remember(torrent,f);};return cfg;}
+var first=await item(file),resolved=new Array(queue.length);resolved[0]=first;
+var cursor=1;
+await Promise.all(Array.from({length:Math.min(3,queue.length-1)},async function(){
+while(cursor<queue.length&&!ctl.signal.aborted){var index=cursor++;try{resolved[index]=await item(queue[index]);}catch(e){resolved[index]=null;}}
+}));
+if(ctl.signal.aborted){if(playbackRequest===ctl)filesView(torrent,available);return;}
+var failed=resolved.findIndex(function(v){return !v;});
+var playlist=failed<0?resolved:resolved.slice(0,failed);
+if(failed>=0)toast('Следующая недоступная серия не будет пропущена. Её можно будет открыть из списка.');
+// Keep a season in the foreground: TCL may terminate Lampa behind ViMu.
+if(serial&&queue.length>1)playlist.forEach(function(cfg){cfg.launch_player='lampa';});
+var launch=Object.assign({},playlist[0],{playlist:playlist});
+if(playlist.length>1&&Lampa.Storage)Lampa.Storage.set('playlist_next',true);
+if(Lampa.Loading)Lampa.Loading.stop();
+if(Lampa.Player.play(launch)===false)throw Error('Плеер не запущен');
+if(typeof Lampa.Player.playlist==='function')Lampa.Player.playlist(playlist);
 remember(torrent,file);
-}).catch(function(e){toast('Воспроизведение: '+e.message);});}
+Lampa.Player.callback(function(){filesView(torrent,available);});
+}catch(e){if(!ctl.signal.aborted)toast('Воспроизведение: '+e.message);if(playbackRequest===ctl)filesView(torrent,allFiles||torrent.files||[file]);}
+finally{if(playbackRequest===ctl){playbackRequest=null;if(Lampa.Loading)Lampa.Loading.stop();}}
+}
 function addMenu(){
 if(!window.jQuery&&!window.$){setTimeout(addMenu,500);return;}
 var $=window.jQuery||window.$;
@@ -153,6 +196,7 @@ else addMenu();
 }
 boot();
 })();
+
 
 
 
