@@ -1,8 +1,8 @@
-/* My TorBox library for Lampa. v1.5.2 — verified library continuation */
+/* My TorBox library for Lampa. v1.5.3 — verified library continuation */
 (function(){
 'use strict';
 if(window.__myTorboxLibrary01)return; window.__myTorboxLibrary01=true;
-var VERSION='1.5.2',playbackSession=0,ownedPlayback=0,latestSelect=null;
+var VERSION='1.5.3',playbackSession=0,ownedPlayback=0,latestSelect=null;
 window.__myTorboxLibraryVersion=VERSION;
 function playerOwnsScreen(){
 if(!ownedPlayback)return false;
@@ -158,9 +158,10 @@ showLibraryDialog({title:'Продолжение просмотра · v'+VERSIO
 function parseResume(query){
 if(typeof query!=='string'||query.indexOf(RESUME_PREFIX)!==0)return null;
 var req=JSON.parse(query.slice(RESUME_PREFIX.length));
-if(!req||typeof req!=='object'||Array.isArray(req)||Object.keys(req).some(function(k){return ['t','s','e','n','f','z'].indexOf(k)<0;})||typeof req.t!=='string'||!req.t.trim()||req.t.length>100||/[\u0000-\u001f]/.test(req.t))throw Error('Некорректная команда библиотеки');
+if(!req||typeof req!=='object'||Array.isArray(req)||Object.keys(req).some(function(k){return ['t','s','e','n','f','z','m'].indexOf(k)<0;})||typeof req.t!=='string'||!req.t.trim()||req.t.length>100||/[\u0000-\u001f]/.test(req.t))throw Error('Некорректная команда библиотеки');
 if(req.n!=null&&!/^[a-f0-9]{32}$/.test(req.n))throw Error('Некорректная сессия');
 if(req.f!=null&&(typeof req.f!=='string'||req.f.length>300||/[\\/\u0000-\u001f:@]/.test(req.f)))throw Error('Некорректный файл');
+if(req.m!=null&&(req.m!==true||!req.f))throw Error('Некорректное восстановление ручного запуска');
 if(req.z!=null&&(!req.f||!Number.isSafeInteger(req.z)||req.z<0||req.z>172800000))throw Error('Некорректная позиция');
 ['s','e'].forEach(function(k){if(req[k]!=null&&(!Number.isInteger(req[k])||req[k]<1||req[k]>(k==='s'?99:999)))throw Error('Некорректный сезон или серия');});
 return req;
@@ -197,13 +198,13 @@ if(matches.length===1){await resumeFiles(matches[0],req,serial);return;}
 resumeError('library_ambiguous');
 }catch(e){if(serial===resumeSerial)resumeError('library_failed');}
 }
-var SESSION_PREFIX='__NEY_SESSION_SETUP__:',sessionPoolKey='mytorbox_ney_tokens_v1',sessionSetupWait=null,manualSetupConfirmed=false;
+var SESSION_PREFIX='__NEY_SESSION_SETUP__:',sessionPoolKey='mytorbox_ney_tokens_v1',sessionSetupWait=null,manualSetupConfirmed=false,manualUnlimited=false;
 function acceptSessionSetup(query){
 if(typeof query!=='string'||query.indexOf(SESSION_PREFIX)!==0)return false;
 try{
 var data=JSON.parse(query.slice(SESSION_PREFIX.length));
 if(!data||!Array.isArray(data.tokens)||!data.tokens.length||data.tokens.length>64||!Number.isSafeInteger(data.expires)||data.expires<=Date.now()||data.expires>Date.now()+86460000||data.tokens.some(function(n,i,a){return typeof n!=='string'||!/^[a-f0-9]{32}$/.test(n)||a.indexOf(n)!==i;}))throw Error('invalid setup');
-localStorage.setItem(sessionPoolKey,JSON.stringify({tokens:data.tokens,expires:data.expires}));if(sessionSetupWait){manualSetupConfirmed=true;sessionSetupWait();}
+localStorage.setItem(sessionPoolKey,JSON.stringify({tokens:data.tokens,expires:data.expires}));if(sessionSetupWait){manualSetupConfirmed=true;manualUnlimited=data.manual_unlimited===true;sessionSetupWait();}
 }catch(e){}return true;
 }
 function takeSessionToken(){try{var data=JSON.parse(localStorage.getItem(sessionPoolKey)||'null');if(!data||data.expires<=Date.now()||!Array.isArray(data.tokens)||!data.tokens.length)return null;var n=data.tokens.shift();if(!/^[a-f0-9]{32}$/.test(n))return null;localStorage.setItem(sessionPoolKey,JSON.stringify(data));return n;}catch(e){return null;}}
@@ -262,7 +263,9 @@ var ordered=orderedVideos(available),cache=cachedMeta(torrent),meta=cache&&cache
 var serial=!!((meta&&meta.media_type==='tv')||ordered.filter(function(f){return !!episodeNumbers(f);}).length>1);
 var selected=ordered.findIndex(function(f){return fileKey(f)===fileKey(file);});
 var queue=serial&&selected>=0?ordered.slice(selected):[file];
-var unsafe=queue.findIndex(function(f){return !(Number(f.size)>0)||Number(f.size)>30*1073741824;});
+// A normal remote selection is the owner choice. Only automatic starts keep the size guard.
+var automatic=!!(resumeRequest&&(resumeRequest.n||(resumeRequest.f&&!resumeRequest.m)));
+var unsafe=automatic?queue.findIndex(function(f){return !(Number(f.size)>0)||Number(f.size)>30*1073741824;}):-1;
 if(unsafe===0)throw Error('Размер видео неизвестен или превышает 30 ГБ');
 if(unsafe>0){queue=queue.slice(0,unsafe);toast('Очередь остановится перед видео с неизвестным размером или больше 30 ГБ');}
 var card=meta||{title:cleanName(torrent.name).title};
@@ -301,7 +304,8 @@ if(ctl.signal.aborted)return;
 var manifest={n:sessionNonce,t:resumeRequest?resumeRequest.t:cleanName(torrent.name).title.slice(0,100),selected:String(file.name||file.path||'').split('/').pop(),files:queue.map(function(f){return {name:String(f.name||f.path||'').split('/').pop(),size:Number(f.size)||0};})};
 if(!sessionNonce)toast('Автовосстановление недоступно: нет связи с APK Ней ТВ');
 else
-if(manifest.files.length<=512&&manifest.files.every(function(f){return f.size>0&&f.size<=30*1073741824;})){
+if(!automatic&&!manualUnlimited&&manifest.files.some(function(f){return !(f.size>0)||f.size>30*1073741824;}))toast('Для автовосстановления этого видео обновите Ней ТВ до 0.6.1');
+else if(manifest.files.length<=512&&manifest.files.every(function(f){return Number.isSafeInteger(f.size)&&f.size>=0&&(!automatic||(f.size>0&&f.size<=30*1073741824));})){
 var handoff='ney-tv-session://register?data='+encodeURIComponent(JSON.stringify(manifest));if(handoff.length<=180000){AndroidJS.openBrowser(handoff);await new Promise(function(resolve){setTimeout(resolve,350);});}
 }
 }
