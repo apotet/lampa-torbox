@@ -1,8 +1,8 @@
-/* My TorBox library for Lampa. v1.5.3 — verified library continuation */
+/* My TorBox library for Lampa. v1.5.4 — verified library continuation */
 (function(){
 'use strict';
 if(window.__myTorboxLibrary01)return; window.__myTorboxLibrary01=true;
-var VERSION='1.5.3',playbackSession=0,ownedPlayback=0,latestSelect=null;
+var VERSION='1.5.4',playbackSession=0,ownedPlayback=0,latestSelect=null;
 window.__myTorboxLibraryVersion=VERSION;
 function playerOwnsScreen(){
 if(!ownedPlayback)return false;
@@ -298,7 +298,9 @@ var duration=Number(checkpoint.duration)||0,percent=duration>0?seconds/duration*
 checkpoint.handler(percent,seconds,duration);
 launch.timeline=Object.assign({},checkpoint,{time:seconds});launch.position=seconds;playlist[0]=Object.assign({},playlist[0],{timeline:launch.timeline,position:seconds});
 }
-if(!(resumeRequest&&resumeRequest.f)&&window.AndroidJS&&typeof AndroidJS.openBrowser==='function'){
+if(!(resumeRequest&&resumeRequest.f)){
+try{
+if(typeof AndroidJS==='undefined'||!AndroidJS.openBrowser)throw Error('Native session bridge unavailable');
 var sessionNonce=resumeRequest&&resumeRequest.n?resumeRequest.n:await manualSessionToken();
 if(ctl.signal.aborted)return;
 var manifest={n:sessionNonce,t:resumeRequest?resumeRequest.t:cleanName(torrent.name).title.slice(0,100),selected:String(file.name||file.path||'').split('/').pop(),files:queue.map(function(f){return {name:String(f.name||f.path||'').split('/').pop(),size:Number(f.size)||0};})};
@@ -308,6 +310,7 @@ if(!automatic&&!manualUnlimited&&manifest.files.some(function(f){return !(f.size
 else if(manifest.files.length<=512&&manifest.files.every(function(f){return Number.isSafeInteger(f.size)&&f.size>=0&&(!automatic||(f.size>0&&f.size<=30*1073741824));})){
 var handoff='ney-tv-session://register?data='+encodeURIComponent(JSON.stringify(manifest));if(handoff.length<=180000){AndroidJS.openBrowser(handoff);await new Promise(function(resolve){setTimeout(resolve,350);});}
 }
+}catch(sessionError){toast('Автовосстановление недоступно: нет связи с APK Ней ТВ');}
 }
 if(playlist.length>1&&Lampa.Storage)Lampa.Storage.set('playlist_next',true);
 // Loading.stop restores the old controller even if its layer was already removed.
