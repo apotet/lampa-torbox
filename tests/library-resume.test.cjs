@@ -12,7 +12,7 @@ test('movie resume shows the saved file under the requested localized title with
  const t={id:44,name:'Несчастный случай (Accident Man) (2018).mkv',files:[{id:1,name:'Accident.Man.2018.mkv',size:24e9}]};
  const x=setup([t],[{key:'44',file:'1',time:Date.now()}]);await x.hooks.resumeLibrary({t:'Несчастный случай'});
  assert.equal(x.searches.length,0);assert.equal(x.dialogs.length,1);
- assert.match(x.dialogs[0].title,/^Несчастный случай · v1\.5\.2$/);
+ assert.match(x.dialogs[0].title,/^Несчастный случай · v1\.5\.3$/);
  assert.equal(x.dialogs[0].items[0].title,'Видео 1');assert.equal(x.dialogs[0].items[0].file.id,1);
  assert.match(x.dialogs[0].items[0].subtitle,/Выбранное видео/);
 });
@@ -149,9 +149,9 @@ test('recovery never requests a new manual session or resets the existing retry 
  x.context.fetch=async()=>({ok:true,json:async()=>({success:true,data:'https://cdn.example.invalid/movie.mkv'})});x.context.Lampa.Player={play:d=>launch=d,playlist(){},callback(){}};
  const f={id:1,name:'Example.mkv',size:1e9};await x.hooks.play({id:11,name:'Example'},f,[f],{t:'Example',f:f.name,z:123000});assert.ok(launch);assert.equal(handoffs,0);
 });
-test('unsafe files stop the ordered queue before playback can cross the size limit',async()=>{
+test('automatic launches stop the ordered queue before playback can cross the size limit',async()=>{
  const x=setup([]);let launch;x.context.fetch=async()=>({ok:true,json:async()=>({success:true,data:'https://cdn.example.invalid/movie.mkv'})});x.context.Lampa.Player={play:d=>launch=d,playlist(){},callback(){}};
- const files=[{id:1,name:'Example.S01E01.mkv',size:1e9},{id:2,name:'Example.S01E02.mkv',size:31*1073741824},{id:3,name:'Example.S01E03.mkv',size:1e9}];await x.hooks.play({id:11,name:'Example'},files[0],files);assert.equal(launch.playlist.length,1);assert.equal(launch.playlist[0].episode,1);
+ const files=[{id:1,name:'Example.S01E01.mkv',size:1e9},{id:2,name:'Example.S01E02.mkv',size:31*1073741824},{id:3,name:'Example.S01E03.mkv',size:1e9}];await x.hooks.play({id:11,name:'Example'},files[0],files,{t:'Example',n:'a'.repeat(32)});assert.equal(launch.playlist.length,1);assert.equal(launch.playlist[0].episode,1);
 });
 
 test('unsolicited cached setup cannot confirm a fresh native handshake',async()=>{
@@ -162,4 +162,27 @@ test('unsolicited cached setup cannot confirm a fresh native handshake',async()=
  x.context.Lampa.Player={play:()=>launches++,playlist(){},callback(){}};
  const f={id:1,name:'Example.mkv',size:1e9};await x.hooks.play({id:11,name:'Example'},f,[f]);
  assert.equal(requests,1);assert.equal(handoffs,0);assert.equal(launches,1);assert.match(x.notices.at(-1),/нет связи с APK/);
+});
+
+test('manual selection permits a 150 GiB movie and keeps large episodes in order',async()=>{
+ const x=setup([]);let launch;x.context.fetch=async()=>({ok:true,json:async()=>({success:true,data:'https://cdn.example.invalid/movie.mkv'})});x.context.Lampa.Player={play:d=>launch=d,playlist(){},callback(){}};
+ const f={id:1,name:'Example.mkv',size:150*1073741824};await x.hooks.play({id:11,name:'Example'},f,[f]);assert.equal(launch.title,f.name);
+ const queue=[{id:1,name:'Example.S01E01.mkv',size:1e9},{id:2,name:'Example.S01E02.mkv',size:150*1073741824},{id:3,name:'Example.S01E03.mkv',size:0}];
+ await x.hooks.play({id:11,name:'Example'},queue[0],queue);assert.deepEqual(Array.from(launch.playlist,v=>v.episode),[1,2,3]);
+});
+test('automatic 150 GiB launch stays blocked while exact manual recovery is allowed',async()=>{
+ const x=setup([]);let launch;x.context.fetch=async()=>({ok:true,json:async()=>({success:true,data:'https://cdn.example.invalid/movie.mkv'})});x.context.Lampa.Player={play:d=>launch=d,playlist(){},callback(){}};
+ const f={id:1,name:'Example.mkv',size:150*1073741824};await x.hooks.play({id:11,name:'Example'},f,[f],{t:'Example',n:'a'.repeat(32)});assert.equal(launch,undefined);assert.match(x.notices.at(-1),/30 ГБ/);
+ await x.hooks.play({id:11,name:'Example'},f,[f],{t:'Example',f:f.name,m:true});assert.equal(launch.title,f.name);
+ assert.throws(()=>x.hooks.parseResume('__NEY_TORBOX__:'+JSON.stringify({t:'Example',m:true})),/ручного/);
+});
+test('large manual manifest uses new APK capability, older APK still plays with a clear recovery limit',async()=>{
+ for(const unlimited of [false,true]){
+  const x=setup([]);x.hooks.installResumeBridge();let handoff,launch;
+  x.context.AndroidJS={openBrowser:u=>{if(u.startsWith('ney-tv-session://request?fresh='))x.context.Lampa.Search.open({input:'__NEY_SESSION_SETUP__:'+JSON.stringify({tokens:['a'.repeat(32)],expires:Date.now()+60000,manual_unlimited:unlimited})});else handoff=u;}};
+  x.context.fetch=async()=>({ok:true,json:async()=>({success:true,data:'https://cdn.example.invalid/movie.mkv'})});x.context.Lampa.Player={play:d=>launch=d,playlist(){},callback(){}};
+  const f={id:1,name:'Example.mkv',size:150*1073741824};await x.hooks.play({id:11,name:'Example'},f,[f]);assert.equal(launch.title,f.name);
+  if(unlimited)assert.equal(JSON.parse(new URL(handoff).searchParams.get('data')).files[0].size,f.size);
+  else {assert.equal(handoff,undefined);assert.match(x.notices.at(-1),/0\.6\.1/);}
+ }
 });
