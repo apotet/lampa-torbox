@@ -12,7 +12,7 @@ test('movie resume shows the saved file under the requested localized title with
  const t={id:44,name:'Несчастный случай (Accident Man) (2018).mkv',files:[{id:1,name:'Accident.Man.2018.mkv',size:24e9}]};
  const x=setup([t],[{key:'44',file:'1',time:Date.now()}]);await x.hooks.resumeLibrary({t:'Несчастный случай'});
  assert.equal(x.searches.length,0);assert.equal(x.dialogs.length,1);
- assert.match(x.dialogs[0].title,/^Несчастный случай · v1\.5\.3$/);
+ assert.match(x.dialogs[0].title,/^Несчастный случай · v1\.5\.4$/);
  assert.equal(x.dialogs[0].items[0].title,'Видео 1');assert.equal(x.dialogs[0].items[0].file.id,1);
  assert.match(x.dialogs[0].items[0].subtitle,/Выбранное видео/);
 });
@@ -185,4 +185,14 @@ test('large manual manifest uses new APK capability, older APK still plays with 
   if(unlimited)assert.equal(JSON.parse(new URL(handoff).searchParams.get('data')).files[0].size,f.size);
   else {assert.equal(handoff,undefined);assert.match(x.notices.at(-1),/0\.6\.1/);}
  }
+});
+
+
+test('native bridge can be lexical without a window property; failures do not prevent playback',async()=>{
+ const x=setup([]);x.hooks.installResumeBridge();let launch,handoffs=0;
+ x.context.nativeBridge={openBrowser:u=>{if(u.startsWith('ney-tv-session://request?fresh='))x.context.Lampa.Search.open({input:'__NEY_SESSION_SETUP__:'+JSON.stringify({tokens:['a'.repeat(32)],expires:Date.now()+60000,manual_unlimited:true})});else handoffs++;}};
+ vm.runInContext('let AndroidJS=globalThis.nativeBridge;',x.context);assert.equal(x.context.window.AndroidJS,undefined);
+ x.context.fetch=async()=>({ok:true,json:async()=>({success:true,data:'https://cdn.example.invalid/movie.mkv'})});x.context.Lampa.Player={play:d=>launch=d,playlist(){},callback(){}};
+ const f={id:1,name:'Example.mkv',size:150*1073741824};await x.hooks.play({id:11,name:'Example'},f,[f]);assert.ok(launch);assert.equal(handoffs,1);
+ x.context.nativeBridge.openBrowser=()=>{throw Error('Unavailable native activity');};launch=null;await x.hooks.play({id:11,name:'Example'},f,[f]);assert.ok(launch);assert.match(x.notices.at(-1),/Автовосстановление недоступно/);
 });
