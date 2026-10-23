@@ -12,7 +12,7 @@ test('movie resume shows the saved file under the requested localized title with
  const t={id:44,name:'Несчастный случай (Accident Man) (2018).mkv',files:[{id:1,name:'Accident.Man.2018.mkv',size:24e9}]};
  const x=setup([t],[{key:'44',file:'1',time:Date.now()}]);await x.hooks.resumeLibrary({t:'Несчастный случай'});
  assert.equal(x.searches.length,0);assert.equal(x.dialogs.length,1);
- assert.match(x.dialogs[0].title,/^Несчастный случай · v1\.5\.4$/);
+ assert.match(x.dialogs[0].title,/^Несчастный случай · v1\.5\.5$/);
  assert.equal(x.dialogs[0].items[0].title,'Видео 1');assert.equal(x.dialogs[0].items[0].file.id,1);
  assert.match(x.dialogs[0].items[0].subtitle,/Выбранное видео/);
 });
@@ -195,4 +195,27 @@ test('native bridge can be lexical without a window property; failures do not pr
  x.context.fetch=async()=>({ok:true,json:async()=>({success:true,data:'https://cdn.example.invalid/movie.mkv'})});x.context.Lampa.Player={play:d=>launch=d,playlist(){},callback(){}};
  const f={id:1,name:'Example.mkv',size:150*1073741824};await x.hooks.play({id:11,name:'Example'},f,[f]);assert.ok(launch);assert.equal(handoffs,1);
  x.context.nativeBridge.openBrowser=()=>{throw Error('Unavailable native activity');};launch=null;await x.hooks.play({id:11,name:'Example'},f,[f]);assert.ok(launch);assert.match(x.notices.at(-1),/Автовосстановление недоступно/);
+});
+
+test('card handoff registers the exact manually selected large movie without leaking URLs',async()=>{
+ const x=setup([]),links=[];const file={id:7,name:'Example.2160p.HDR.mkv',size:104*1073741824,url:'https://private.invalid/token'};
+ x.context.AndroidJS={openBrowser(url){links.push(url);if(url.startsWith('ney-tv-session://request'))x.hooks.acceptSessionSetup('__NEY_SESSION_SETUP__:'+JSON.stringify({tokens:['a'.repeat(32)],expires:Date.now()+60000,manual_unlimited:true}));}};
+ assert.equal(await x.context.MyTorBoxRecovery.armManual({id:90,name:'Example.2026.2160p.HDR'},file,[file],new AbortController().signal),true);
+ const register=links.find(u=>u.startsWith('ney-tv-session://register'));assert.ok(register);
+ const manifest=JSON.parse(new URL(register).searchParams.get('data'));
+ assert.equal(manifest.selected,file.name);assert.equal(manifest.files[0].size,file.size);assert.equal(manifest.files.length,1);
+ assert.ok(!JSON.stringify(manifest).includes('private.invalid'));assert.equal(x.searches.length,0);
+});
+test('cancelled card launch does not register or play a file',async()=>{
+ const x=setup([]),links=[],ctl=new AbortController();ctl.abort();
+ x.context.AndroidJS={openBrowser(url){links.push(url);if(url.startsWith('ney-tv-session://request'))x.hooks.acceptSessionSetup('__NEY_SESSION_SETUP__:'+JSON.stringify({tokens:['b'.repeat(32)],expires:Date.now()+60000,manual_unlimited:true}));}};
+ assert.equal(await x.context.MyTorBoxRecovery.armManual({id:90,name:'Example'},{id:7,name:'Example.mkv',size:1},[{id:7,name:'Example.mkv',size:1}],ctl.signal),false);
+ assert.equal(links.filter(u=>u.startsWith('ney-tv-session://register')).length,0);
+});
+test('exact recovery selects its release before newer history and rejects duplicate filenames',async()=>{
+ const torrents=[{id:1,name:'Example.2026.1080p',files:[{id:1,name:'Example.1080p.mkv',size:1e9}]},{id:2,name:'Example.2026.2160p',files:[{id:2,name:'Example.2160p.mkv',size:70e9}]}];
+ const x=setup(torrents,[{key:'1',file:'1',time:Date.now()}]);await x.hooks.resumeLibrary({t:'Example',m:true,f:'Example.2160p.mkv'});
+ assert.equal(x.dialogs.at(-1).items[0].file.name,'Example.2160p.mkv');
+ const y=setup([torrents[1],{...torrents[1],id:3}]);await y.hooks.resumeLibrary({t:'Example',m:true,f:'Example.2160p.mkv'});
+ assert.match(y.dialogs.at(-1).items[0].title,/несколько загрузок/);
 });

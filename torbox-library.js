@@ -1,8 +1,8 @@
-/* My TorBox library for Lampa. v1.5.4 — verified library continuation */
+/* My TorBox library for Lampa. v1.5.5 — verified library continuation */
 (function(){
 'use strict';
 if(window.__myTorboxLibrary01)return; window.__myTorboxLibrary01=true;
-var VERSION='1.5.4',playbackSession=0,ownedPlayback=0,latestSelect=null;
+var VERSION='1.5.5',playbackSession=0,ownedPlayback=0,latestSelect=null;
 window.__myTorboxLibraryVersion=VERSION;
 function playerOwnsScreen(){
 if(!ownedPlayback)return false;
@@ -192,6 +192,17 @@ var history=recent(),isRecent=req.t==='@recent'||req.t==='@yesterday';
 var matches=sortLibrary(libraryData.filter(function(t){if(!isRecent)return resumeMatch(t,req.t);var h=lastPlayed(t,history);if(!h)return false;if(req.t==='@yesterday'){var date=new Date();date.setDate(date.getDate()-1);return new Date(h.time).toDateString()===date.toDateString();}return true;}),history);
 if(!isRecent&&!matches.length){matches=sortLibrary(await translatedMatches(libraryData,req.t),history);if(serial!==resumeSerial)return;}
 if(!matches.length){resumeError(isRecent?'history_missing':'library_not_found');return;}
+if(req.f&&matches.length>1){
+var exactTorrents=[];
+for(var i=0;i<matches.length;i++){
+var candidate=matches[i],candidateFiles=Array.isArray(candidate.files)?candidate.files:[];
+if(!candidateFiles.length){var detail=await api('torrents/mylist?id='+encodeURIComponent(candidate.id)+'&bypass_cache=true');candidateFiles=Array.isArray(detail)?((detail[0]&&detail[0].files)||[]):((detail&&detail.files)||[]);candidate.files=candidateFiles;}
+if(serial!==resumeSerial)return;
+if(candidateFiles.some(function(f){return String(f.name||f.path||'').split('/').pop()===req.f;}))exactTorrents.push(candidate);
+}
+if(exactTorrents.length!==1){resumeError(exactTorrents.length?'library_ambiguous':'episode_not_found');return;}
+matches=exactTorrents;
+}
 if(matches.length>1){var first=lastPlayed(matches[0],history),second=lastPlayed(matches[1],history);if(first&&(!second||first.time>second.time))matches=[matches[0]];}
 if(isRecent&&matches.length===1)req=Object.assign({},req,{t:cleanName(matches[0].name).title});
 if(matches.length===1){await resumeFiles(matches[0],req,serial);return;}
@@ -214,6 +225,26 @@ var n=manualSetupConfirmed?takeSessionToken():null;if(n)return n;
 await new Promise(function(resolve){var timer=setTimeout(done,3500);function done(){clearTimeout(timer);sessionSetupWait=null;resolve();}sessionSetupWait=done;try{AndroidJS.openBrowser('ney-tv-session://request?fresh='+Date.now());}catch(e){done();}});
 return manualSetupConfirmed?takeSessionToken():null;
 }
+// Shared handoff for explicit remote selections from both the library and card sources.
+async function armManualPlayback(torrent,file,queue,signal){
+try{
+if(typeof AndroidJS==='undefined'||!AndroidJS.openBrowser)throw Error('Native session bridge unavailable');
+var n=await manualSessionToken();if(signal&&signal.aborted)return false;
+if(!n)throw Error('Native session not confirmed');
+var files=queue.map(function(f){return {name:String(f.name||f.path||'').split('/').pop(),size:Number(f.size)||0};});
+var selected=String(file.name||file.path||'').split('/').pop();
+if(!files.length||files.length>512||!files.some(function(f){return f.name===selected;})||files.some(function(f){return !Number.isSafeInteger(f.size)||f.size<0||!f.name||f.name.length>300||/[\\/:@\u0000-\u001f]/.test(f.name);}))throw Error('Invalid selected queue');
+if(!manualUnlimited&&files.some(function(f){return !(f.size>0)||f.size>30*1073741824;})){toast('Для автовосстановления этого видео обновите Ней ТВ до 0.6.1');return false;}
+var manifest={n:n,t:cleanName(torrent.name).title.slice(0,100),selected:selected,files:files};
+if(!manifest.t)throw Error('Missing torrent title');
+var handoff='ney-tv-session://register?data='+encodeURIComponent(JSON.stringify(manifest));
+if(handoff.length>180000)throw Error('Queue too large');
+AndroidJS.openBrowser(handoff);await new Promise(function(resolve){setTimeout(resolve,350);});
+if(signal&&signal.aborted)return false;
+remember(torrent,file);return true;
+}catch(e){toast('Автовосстановление недоступно: не удалось зарегистрировать ручной запуск');return false;}
+}
+window.MyTorBoxRecovery={armManual:armManualPlayback};
 function installResumeBridge(){
 if(!Lampa.Search||typeof Lampa.Search.open!=='function'){setTimeout(installResumeBridge,500);return;}
 var descriptor=Object.getOwnPropertyDescriptor(Lampa.Search,'open');if(descriptor&&descriptor.get&&descriptor.get.__mytorboxResume)return;

@@ -24,7 +24,7 @@ try {
   window[PLUGIN_FLAG] = true;
 
   // ───────────────────────────── Constants / Config ─────────────────────────────
-  const VERSION = '51.2.18-vimu-playlist';
+  const VERSION = '51.2.19-ney-manual';
 
   const CONST = {
     CACHE_LIMIT: 128,
@@ -2454,6 +2454,15 @@ try {
         // Only the launch item owns the array (no circular playlist objects).
         const launchConfig = Object.assign({}, playbackConfig, { playlist });
         if (playlist.length > 1 && Lampa.Storage?.set) Lampa.Storage.set('playlist_next', true);
+        // The owner selected this exact file. Register the same prepared queue
+        // before ViMu starts, including movies and files larger than 30 GiB.
+        try {
+          if (!window.MyTorBoxRecovery?.armManual) throw new Error('Ney handoff unavailable');
+          await window.MyTorBoxRecovery.armManual(torrentData, file, entries.map(entry => entry.file), controller.signal);
+        } catch (error) {
+          Lampa.Noty.show('Автовосстановление недоступно: обновите плагин «Мой TorBox»');
+        }
+        if (controller.signal.aborted) throw { type: 'cancel' };
         stopPlaybackLoading();
 
         const startResult = Lampa.Player.play(launchConfig);
